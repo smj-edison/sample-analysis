@@ -13,6 +13,9 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
     y = lfilter(b, a, data)
     return y
 
+def apply_filter(b, a, x, xm1, xm2):
+    return b[0]*x + b[1]*xm1 + b[2]*xm2 - a[1]*xm1 + a[2]*xm2
+
 def load_audio_mono(filename):
     sample_rate, data = wavfile.read(filename)
     audio_raw = np.array(list(zip(*data))[0]) / 32768

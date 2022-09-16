@@ -30,16 +30,14 @@ def calc_amp(audio):
 def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_steps=20):
     # smooth down signals, then move them back to their original range
     freq = calc_freqs(sig, sample_rate, min_freq, max_freq, freq_steps)
-    freq_min, freq_max = np.min(freq), np.max(freq)
-    freq_norm = ((freq - freq_min) / (freq_max - freq_min)) - 0.5
+    freq_norm, freq_min, freq_max = norm_sig(freq)
     freq_smoothed = butter_lowpass_filter(freq_norm, lp_freq, sample_rate)
-    freq_final = (freq_smoothed * (freq_max - freq_min)) + freq_min
+    freq_final = denorm_sig(freq_smoothed, freq_min, freq_max)
 
     amp = calc_amp(sig)
-    amp_min, amp_max = np.min(amp), np.max(amp)
-    amp_norm = ((amp - amp_min) / (amp_max - amp_min)) - 0.5
+    amp_norm, amp_min, amp_max = norm_sig(amp)
     amp_smoothed = butter_lowpass_filter(amp_norm, lp_freq, sample_rate)
-    amp_final = (amp_smoothed * (amp_max - amp_min)) + amp_min
+    amp_final = denorm_sig(amp_smoothed, amp_min, amp_max)
 
     return (freq_final, amp_final)
 
@@ -82,4 +80,4 @@ def calc_trem_shape(sig_unnorm, sample_rate, min_trem_speed=1, max_trem_speed=9,
 
         plt.show()
 
-    return avg_trem_final
+    return avg_trem_final, offset
