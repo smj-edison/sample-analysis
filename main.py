@@ -63,13 +63,13 @@ audio_out = []
 audio_loc = 0
 global_loc = 0
 table_freq = 6.3
-detune = 1.1
+detune = 1
 
 while audio_loc < (len(nontremmed) - detune * 3) / sample_rate:
     pos_in_audio = audio_loc * sample_rate
 
     target_freq = lookup(freq_trem_table, table_freq, global_loc)
-    #detune = target_freq / base_freq
+    detune = target_freq / base_freq
 
     target_amp = lookup(amp_trem_table, table_freq, global_loc)
     gain = target_amp / base_amp
