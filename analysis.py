@@ -6,7 +6,7 @@ import cmath
 from scipy.signal import zoom_fft, hilbert
 import matplotlib.pyplot as plt
 
-from helpers import butter_lowpass_filter, denorm_sig, norm_sig
+from helpers import butter_lowpass_filter, denorm_sig, norm_sig, resample_to
 
 two_pi = pi * 2
 
@@ -81,3 +81,72 @@ def calc_trem_shape(sig_unnorm, sample_rate, min_trem_speed=1, max_trem_speed=9,
         plt.show()
 
     return avg_trem_final, offset
+
+def get_best_roll(sig_to_roll, sig_ref):
+    roll_by = 0
+    largest = 0
+
+    for i in range(0, len(sig_to_roll)):
+        res = sig_to_roll.dot(sig_ref)
+
+        if res > largest:
+            largest = res
+            roll_by = i
+
+        sig_to_roll = np.roll(sig_to_roll, 1)
+
+    return roll_by
+
+def calc_trem_table(
+    audio,
+    note_freq,
+    sample_rate,
+    freq_spread=100,
+    freq_steps=20,
+    trem_steps=512,
+    lp_freq=20,
+    min_trem_speed=1,
+    max_trem_speed=9,
+    plot_results=False,
+):
+    lower_test_bound = note_freq * (2 ** (-freq_spread / 1200))
+    higher_test_bound = note_freq * (2 ** (freq_spread / 1200))
+
+    t_freq, t_amp = get_sig_freq_and_amp(
+        audio,
+        sample_rate,
+        lower_test_bound,
+        higher_test_bound,
+        lp_freq=lp_freq,
+        freq_steps=freq_steps
+    )
+
+    freq_trem, freq_trem_offset = calc_trem_shape(
+        t_freq,
+        sample_rate,
+        min_trem_speed=min_trem_speed,
+        max_trem_speed=max_trem_speed
+    )
+    amp_trem, amp_trem_offset = calc_trem_shape(
+        t_amp,
+        sample_rate,
+        min_trem_speed=min_trem_speed,
+        max_trem_speed=max_trem_speed
+    )
+
+    freq_trem_table = resample_to(freq_trem, trem_steps)
+    amp_trem_table = resample_to(amp_trem, trem_steps)
+
+    freq_trem_norm = norm_sig(freq_trem_table)[0]
+    amp_trem_norm = norm_sig(amp_trem_table)[0]
+
+    # line up phase in trem tables
+    roll_by = get_best_roll(amp_trem_norm, freq_trem_norm)
+    amp_trem_table = np.roll(amp_trem_table, roll_by)
+
+    if plot_results:
+        amp_trem_norm = norm_sig(amp_trem_table)[0]
+
+        plt.plot(amp_trem_norm)
+        plt.plot(freq_trem_norm)
+        plt.show()
