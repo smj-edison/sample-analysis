@@ -6,7 +6,7 @@ from scipy.signal import resample
 from scipy.io import wavfile
 
 from helpers import hermite_interp, load_audio_mono, norm_sig, resample_to, table_lookup
-from analysis import get_sig_freq_and_amp, calc_trem_shape, get_best_roll
+from analysis import get_sig_freq_and_amp, calc_trem_table
 
 two_pi = pi * 2
 
@@ -26,18 +26,7 @@ nt_freq, nt_amp = get_sig_freq_and_amp(nontremmed, sample_rate, analysis_range[0
 base_freq = np.mean(nt_freq)
 base_amp = np.mean(nt_amp)
 
-t_freq, t_amp = get_sig_freq_and_amp(tremmed, sample_rate, analysis_range[0], analysis_range[1])
-
-
-freq_trem, freq_trem_offset = calc_trem_shape(t_freq, sample_rate, plot_results=False)
-amp_trem, amp_trem_offset = calc_trem_shape(t_amp, sample_rate, plot_results=False)
-
-freq_trem_table = resample_to(freq_trem, trem_steps)
-amp_trem_table = resample_to(amp_trem, trem_steps)
-
-freq_trem_norm = norm_sig(freq_trem_table)[0]
-amp_trem_norm = norm_sig(amp_trem_table)[0]
-
+freq_trem_table, amp_trem_table = calc_trem_table(tremmed, 440, sample_rate, plot_results=True)
 
 audio_out = []
 audio_loc = 0

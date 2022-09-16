@@ -134,6 +134,8 @@ def calc_trem_table(
         max_trem_speed=max_trem_speed
     )
 
+    trem_freq = sample_rate / ((len(freq_trem) + len(amp_trem)) / 2)
+
     freq_trem_table = resample_to(freq_trem, trem_steps)
     amp_trem_table = resample_to(amp_trem, trem_steps)
 
@@ -150,3 +152,5 @@ def calc_trem_table(
         plt.plot(amp_trem_norm)
         plt.plot(freq_trem_norm)
         plt.show()
+
+    return freq_trem_table, amp_trem_table, trem_freq
