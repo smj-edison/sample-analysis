@@ -1,8 +1,14 @@
 import numpy as np
 import pywt
-from scipy import signal
 
-from helpers import butter_lowpass_filter
+from math import pi, floor
+import cmath
+from scipy.signal import zoom_fft, hilbert
+import matplotlib.pyplot as plt
+
+from helpers import butter_lowpass_filter, denorm_sig, norm_sig
+
+two_pi = pi * 2
 
 def calc_freqs(audio, sample_rate, min_freq, max_freq, steps):
     freqs_to_check = np.linspace(min_freq, max_freq, steps, endpoint=False)
@@ -19,20 +25,61 @@ def calc_freqs(audio, sample_rate, min_freq, max_freq, steps):
     return freqs_to_check[maxes]
 
 def calc_amp(audio):
-    return abs(signal.hilbert(audio))
+    return abs(hilbert(audio))
 
-def analyze_trem(audio, sample_rate, min_freq, max_freq, max_trem_speed=9, freq_steps=20):
+def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_steps=20):
     # smooth down signals, then move them back to their original range
-    freq = calc_freqs(audio, sample_rate, min_freq, max_freq, freq_steps)
+    freq = calc_freqs(sig, sample_rate, min_freq, max_freq, freq_steps)
     freq_min, freq_max = np.min(freq), np.max(freq)
     freq_norm = ((freq - freq_min) / (freq_max - freq_min)) - 0.5
-    freq_smoothed = butter_lowpass_filter(freq_norm, max_trem_speed, sample_rate)
+    freq_smoothed = butter_lowpass_filter(freq_norm, lp_freq, sample_rate)
     freq_final = (freq_smoothed * (freq_max - freq_min)) + freq_min
 
-    amp = calc_amp(audio)
+    amp = calc_amp(sig)
     amp_min, amp_max = np.min(amp), np.max(amp)
     amp_norm = ((amp - amp_min) / (amp_max - amp_min)) - 0.5
-    amp_smoothed = butter_lowpass_filter(amp_norm, max_trem_speed, sample_rate)
+    amp_smoothed = butter_lowpass_filter(amp_norm, lp_freq, sample_rate)
     amp_final = (amp_smoothed * (amp_max - amp_min)) + amp_min
 
     return (freq_final, amp_final)
+
+def calc_trem_shape(sig_unnorm, sample_rate, min_trem_speed=1, max_trem_speed=9, plot_results=False):
+    sig, sig_min, sig_max = norm_sig(sig_unnorm)
+
+    analysis = zoom_fft(sig, [min_trem_speed, max_trem_speed], fs=sample_rate)
+    analysis_freqs = np.linspace(min_trem_speed, max_trem_speed, len(sig))
+
+    # identify the frequency with most amplitude
+    biggest_freq = np.argmax(abs(analysis))
+
+    phase = (cmath.phase(analysis[biggest_freq]) + two_pi) % two_pi
+    remaining_phase = two_pi - phase
+    freq = analysis_freqs[biggest_freq]
+
+    # get phase offset in terms of position in time
+    offset = (remaining_phase / two_pi * sample_rate) / freq
+    freq_in_time = sample_rate / freq
+
+    # chop the signal up based on detected frequency (cutting off the beginning)
+    slices = []
+    for i in np.arange(offset, len(sig), freq_in_time):
+        slices.append(sig[floor(i):(floor(freq_in_time) + floor(i))])
+
+    # discard the last one if it's too short
+    if len(slices[-1]) != len(slices[0]):
+        slices.pop()
+
+    trem_chunks = np.stack(slices)
+    avg_trem = np.mean(trem_chunks, axis=0)
+    avg_trem_final = denorm_sig(avg_trem, sig_min, sig_max)
+
+    if plot_results:
+        plt.plot(sig_unnorm)
+
+        for i in np.arange(offset, len(sig), freq_in_time):
+            plt.axvline(x=(i + 0.0), color="black")
+            plt.plot(range(floor(i), floor(i) + len(slices[0]), 1), avg_trem_final, color="r")
+
+        plt.show()
+
+    return avg_trem_final

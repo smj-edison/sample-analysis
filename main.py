@@ -1,20 +1,20 @@
-import math
-from math import floor
-import numpy as np
+from math import floor, ceil, pi
+
 import matplotlib.pyplot as plt
-import cmath
+import numpy as np
+from scipy.signal import resample
+from scipy.io import wavfile
 
-import scipy.interpolate
-from scipy import signal
-from scipy.signal import butter, lfilter, freqz, zoom_fft
-from scipy.fft import rfft, fftfreq, fftshift
+from helpers import hermite_interp, lerp, load_audio_mono, norm_sig
+from analysis import get_sig_freq_and_amp, calc_trem_shape
 
-from helpers import load_audio_mono, norm_sig, denorm_sig
-from analysis import calc_freqs, calc_amp, analyze_trem
+two_pi = pi * 2
 
 # tuning parameters
 assumed_max_trem_speed = 9
 assumed_min_trem_speed = 1
+
+trem_steps = 512
 
 analysis_range = [420, 460]
 
@@ -22,67 +22,62 @@ analysis_range = [420, 460]
 sample_rate, nontremmed = load_audio_mono("./069-A-nt.wav")
 sample_rate, tremmed = load_audio_mono("./069-A.wav")
 
-nt_freq, nt_amp = analyze_trem(nontremmed, sample_rate, analysis_range[0], analysis_range[1])
-t_freq, t_amp = analyze_trem(tremmed, sample_rate, analysis_range[0], analysis_range[1])
+nt_freq, nt_amp = get_sig_freq_and_amp(nontremmed, sample_rate, analysis_range[0], analysis_range[1])
+base_freq = np.mean(nt_freq)
+base_amp = np.mean(nt_amp)
 
+t_freq, t_amp = get_sig_freq_and_amp(tremmed, sample_rate, analysis_range[0], analysis_range[1])
 
 min_len = min(len(nt_freq), len(t_freq))
 nt_freq = nt_freq[0:min_len]
 t_freq = t_freq[0:min_len]
 
+freq_trem = calc_trem_shape(t_freq, sample_rate, plot_results=False)
+amp_trem = calc_trem_shape(t_amp, sample_rate, plot_results=False)
+
+freq_trem_table = np.interp(np.linspace(0, 1, trem_steps), np.linspace(0, 1, len(freq_trem)), freq_trem)
+amp_trem_table = np.interp(np.linspace(0, 1, trem_steps), np.linspace(0, 1, len(amp_trem)), amp_trem)
+
+freq_trem_norm = norm_sig(freq_trem_table)[0]
+amp_trem_norm = norm_sig(amp_trem_table)[0]
+
+def lookup(table, table_freq, pos):
+    pos_in_table = pos * len(table) * table_freq
+
+    return lerp(table[floor(pos_in_table) % len(table)], table[ceil(pos_in_table) % len(table)], pos_in_table % 1)
+
+plt.plot(freq_trem_norm)
+plt.plot(amp_trem_norm)
 plt.show()
 
-reference_sig = t_freq_smoothed
-sig = zoom_fft(reference_sig, [assumed_min_trem_speed, assumed_max_trem_speed], fs=sample_rate)
+audio_out = []
+audio_loc = 0
+global_loc = 0
+table_freq = 6.3
+detune = 1
 
-freqs = np.linspace(assumed_min_trem_speed, assumed_max_trem_speed, len(reference_sig))
+while audio_loc < (len(nontremmed) - detune * 3) / sample_rate:
+    pos_in_audio = audio_loc * sample_rate
 
-# identify broad range
-biggest_freq = np.argmax(abs(sig))
-
-phase = (cmath.phase(sig[biggest_freq]) + (math.pi*2)) % (math.pi*2)
-remaining_phase = (math.pi*2) - phase
-freq = freqs[biggest_freq]
-
-# get phase offset in terms of position in time
-offset = (remaining_phase / (math.pi*2) * sample_rate) / freq
-freq_in_time = sample_rate / freq
+    sample0 = nontremmed[floor(pos_in_audio - detune * 1)]
+    sample1 = nontremmed[floor(pos_in_audio + detune * 0)]
+    sample2 = nontremmed[floor(pos_in_audio + detune * 1)]
+    sample3 = nontremmed[floor(pos_in_audio + detune * 2)]
 
 
-# chop the signal up (cutting off the beginning)
-slices = []
-for i in np.arange(offset, len(reference_sig), freq_in_time):
-    slices.append(reference_sig[floor(i):(floor(freq_in_time) + floor(i))])
+    target_freq = lookup(freq_trem_table, table_freq, global_loc)
+    detune = target_freq / base_freq
 
-# discard the last one if it's too short
-if len(slices[-1]) != len(slices[0]):
-    slices.pop()
+    target_amp = lookup(amp_trem_table, table_freq, global_loc)
+    gain = target_amp / base_amp
 
-trem_chunks = np.stack(slices)
-avg_trem = np.mean(trem_chunks, axis=0)
-avg_trem_final = (avg_trem * (np.max(t_freq) - np.min(t_freq))) + np.min(t_freq)
 
-reference_sig_final = (reference_sig * (np.max(t_freq) - np.min(t_freq))) + np.min(t_freq)
+    sample = hermite_interp(sample0, sample1, sample2, sample3, pos_in_audio % 1) * gain
+    audio_out.append(sample)
 
-plt.plot(reference_sig_final)
 
-for i in np.arange(offset, len(reference_sig_final), freq_in_time):
-    plt.axvline(x=(i + 0.0), color="black")
-    plt.plot(range(floor(i), floor(i) + len(slices[0]), 1), avg_trem_final, color="r")
+    audio_loc += detune / sample_rate
+    global_loc += 1 / sample_rate
 
-plt.show()
+wavfile.write("out.wav", sample_rate, np.array(audio_out))
 
-# find the biggest frequency
-
-# freqs = (freqs - freqs.min()) / (freqs.max() - freqs.min()) - 0.5
-# amplitudes = (amplitudes - amplitudes.min()) / (amplitudes.max() - amplitudes.min()) - 0.5
-
-# start = 5000
-# end = len(freqs) - (48000 * 5)
-
-# freqs = freqs[start:end]
-# amplitudes = amplitudes[start:end]
-
-# plt.plot(signal.savgol_filter(freqs, 51, 3))
-# plt.plot(amplitudes)
-# plt.show()

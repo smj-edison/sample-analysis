@@ -24,9 +24,18 @@ def norm_sig(signal):
 
     signal_norm = (((signal - signal_min) / (signal_max - signal_min)) * 2) - 1
 
-    (signal_norm, signal_min, signal_max)
+    return (signal_norm, signal_min, signal_max)
 
 def denorm_sig(signal, signal_min, signal_max):
     signal_denorm = (((signal + 1) / 2) * (signal_max - signal_min)) + signal_min
 
-    signal_denorm
+    return signal_denorm
+
+# https://stackoverflow.com/questions/1125666/how-do-you-do-bicubic-or-other-non-linear-interpolation-of-re-sampled-audio-da
+def hermite_interp(x0, x1, x2, x3, t):
+    c0 = x1
+    c1 = 0.5 * (x2 - x0)
+    c2 = x0 - (2.5 * x1) + (2 * x2) - (0.5 * x3)
+    c3 = (0.5 * (x3 - x0)) + (1.5 * (x1 - x2))
+
+    return (((((c3 * t) + c2) * t) + c1) * t) + c0
