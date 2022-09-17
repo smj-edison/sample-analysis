@@ -9,9 +9,9 @@ from scipy.io import wavfile
 from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig
 
 
-sample_rate, nontremmed = load_audio_mono("./069-A-nt.wav")
+sample_rate, nontremmed = load_audio_mono("./test-samples/073-C#.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-freq = 440
+freq = 554
 
 # use the hilbert transform to get the envelope
 envelope = calc_amp(nontremmed)
@@ -48,7 +48,7 @@ search_width = 40000
 search_step = 100
 strictness_start = 0.5
 strictness_relax_factor = 0.1
-too_far_in_percentage = 0.15
+too_far_in_percentage = 0.2
 
 # it starts very strict, and will keep trying and relaxing until it gets a good hit
 strictness = strictness_start
@@ -86,21 +86,16 @@ while release_index == -1:
 
 attack_index = floor(attack_index)
 
+plt.plot(envelope_deriv)
+plt.show()
+
 # To make sure phases line up, we'll take the fft surrounding the inputted frequency
 # this way we can zero in on the exact frequency that we should be checking for loop
 # points along
 potential_loop = nontremmed[floor(attack_index):floor(release_index)]
 
-spread = 100
-min_freq = freq * (2 ** (-spread / 1200))
-max_freq = freq * (2 ** (spread / 1200))
-
-analysis = zoom_fft(potential_loop, [min_freq, max_freq], fs=sample_rate)
-analysis_freqs = np.linspace(min_freq, max_freq, len(potential_loop))
-detected_freq = analysis_freqs[np.argmax(abs(analysis))]
-
 # Now we have where to look along for loop points, we'll proceed to do so
-increment_by = (sample_rate / detected_freq) * 8
+increment_by = (sample_rate / freq) * 8
 increment_by_int = floor(increment_by)
 
 highest_score = -math.inf
@@ -118,7 +113,7 @@ for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by
 
     # encourage first samples to line up more than any of the others
     point_diff = 0.5 - abs(ref_sample[0] - potential_loop[pos])
-    similarity_bias = ((point_diff * 50) ** 3 / 48000)
+    similarity_bias = ((point_diff * 50) ** 3 / 70000)
     score += similarity_bias
 
     amp_closeness = np.dot(
