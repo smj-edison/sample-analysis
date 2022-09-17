@@ -84,6 +84,8 @@ while release_index == -1:
 
     strictness += strictness_relax_factor
 
+attack_index = floor(attack_index)
+
 # To make sure phases line up, we'll take the fft surrounding the inputted frequency
 # this way we can zero in on the exact frequency that we should be checking for loop
 # points along
@@ -98,50 +100,43 @@ analysis_freqs = np.linspace(min_freq, max_freq, len(potential_loop))
 detected_freq = analysis_freqs[np.argmax(abs(analysis))]
 
 # Now we have where to look along for loop points, we'll proceed to do so
-increment_by = (sample_rate / freq) * 4
+increment_by = (sample_rate / detected_freq) * 8
 increment_by_int = floor(increment_by)
-
 
 highest_score = -math.inf
 highest_index = -1
-highest_ref_index = -1
 
-loop_max = np.max(potential_loop)
+ref_sample = potential_loop[0:increment_by_int]
 
-for ref_index in np.arange(0, len(potential_loop) * 0.4, increment_by * 50):
-    ref_pos = floor(ref_index)
-    ref_sample = potential_loop[ref_pos:(ref_pos + increment_by_int)]
+for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 1):
+    pos = floor(i)
 
-    start_point = (floor(len(potential_loop) / increment_by) * increment_by) - increment_by_int
+    score = 0
 
-    for i in np.arange(len(potential_loop) * 0.7, start_point, 1):
-        pos = floor(i)
+    cross_corr = (ref_sample.dot(potential_loop[pos:(pos + increment_by_int)]) / increment_by) * 10
+    score += cross_corr
 
-        cross_corr = (ref_sample.dot(potential_loop[pos:(pos + increment_by_int)]) / increment_by) * 100
-        score = cross_corr
+    # encourage first samples to line up more than any of the others
+    point_diff = 0.5 - abs(ref_sample[0] - potential_loop[pos])
+    similarity_bias = ((point_diff * 50) ** 3 / 48000)
+    score += similarity_bias
 
-        # encourage first samples to line up more than any of the others
-        point_diff = loop_max - abs(ref_sample[0] - potential_loop[pos])
-        similarity_bias = ((point_diff * 50) ** 3 / 180)
-        #score += similarity_bias
+    amp_closeness = np.dot(
+        envelope[attack_index:(attack_index + increment_by_int)],
+        envelope[(attack_index + pos):(attack_index + pos + increment_by_int)]
+    ) / increment_by * 5
+    score += amp_closeness
 
-        amp_diff_penalty = np.dot(
-            envelope_norm[floor(attack_index + ref_pos):floor(attack_index + ref_pos + increment_by)],
-            envelope_norm[floor(attack_index + pos):floor(attack_index + pos + increment_by)]
-        ) / increment_by
-        score += amp_diff_penalty
+    if score > highest_score:
+        highest_score = score
+        highest_index = pos
 
-        if score > highest_score:
-            highest_score = score
-            highest_index = pos
-            highest_ref_index = ref_index
+        print(f"cross correlation: {cross_corr}")
+        print(f"similarity: {similarity_bias} (diff {point_diff})")
+        print(f"amplitude closeness: {amp_closeness}")
+        print("---")
 
-            print(f"cross correlation: {cross_corr}")
-            print(f"similarity: {similarity_bias}")
-            print(f"penalty: {amp_diff_penalty}")
-            print("---")
-
-plt.plot(ref_sample)
+plt.plot(potential_loop[0:increment_by_int])
 plt.plot(potential_loop[highest_index:(highest_index + increment_by_int)])
 plt.show()
 
