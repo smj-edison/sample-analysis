@@ -9,9 +9,9 @@ from scipy.io import wavfile
 from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig
 
 
-sample_rate, nontremmed = load_audio_mono("./test-samples/073-C#.wav")
+sample_rate, nontremmed = load_audio_mono("./test-samples/076-E.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-freq = 554
+freq = 659
 
 # use the hilbert transform to get the envelope
 envelope = calc_amp(nontremmed)
@@ -36,7 +36,7 @@ std = np.std(envelope_deriv)
 
 # find the peaks
 peak_attack = np.argmax(envelope_deriv)
-peak_release = np.argmin(envelope_deriv)
+peak_release = np.argmin(envelope_deriv[peak_attack:]) + peak_attack
 
 # find start of attack
 attack_index = -1
@@ -46,9 +46,10 @@ release_index = -1
 # search for spots to stay within for picking a loop
 search_width = 40000
 search_step = 100
-strictness_start = 0.5
-strictness_relax_factor = 0.1
-too_far_in_percentage = 0.2
+strictness_start = 0.3
+strictness_relax_factor = 1.2
+too_far_in_percentage_attack = 0.15
+too_far_in_percentage_release = 0.2
 
 # it starts very strict, and will keep trying and relaxing until it gets a good hit
 strictness = strictness_start
@@ -64,10 +65,13 @@ while attack_index == -1:
             break
 
     # if the loop point seems too far in the sample, keep iterating
-    if attack_index > len(nontremmed) * too_far_in_percentage:
+    if attack_index > len(nontremmed) * too_far_in_percentage_attack:
         attack_index = -1
 
-    strictness += strictness_relax_factor
+    strictness *= strictness_relax_factor
+
+    if strictness > 50:
+        raise Exception("signal is too noisy")
 
 strictness = strictness_start
 while release_index == -1:
@@ -75,19 +79,19 @@ while release_index == -1:
         rms = calc_rms(envelope_deriv[(i - search_width):i])
 
         if rms < (std * strictness) + mean:
-            release_index = i - search_width / 2
+            release_index = i
             break
 
     # if the loop point seems too far in the sample, keep iterating
-    if release_index < len(nontremmed) * (1 - too_far_in_percentage):
+    if release_index < len(nontremmed) * (1 - too_far_in_percentage_release):
         release_index = -1
 
     strictness += strictness_relax_factor
 
-attack_index = floor(attack_index)
+    if strictness > 50:
+        raise Exception("signal is too noisy")
 
-plt.plot(envelope_deriv)
-plt.show()
+attack_index = floor(attack_index)
 
 # To make sure phases line up, we'll take the fft surrounding the inputted frequency
 # this way we can zero in on the exact frequency that we should be checking for loop
@@ -113,13 +117,13 @@ for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by
 
     # encourage first samples to line up more than any of the others
     point_diff = 0.5 - abs(ref_sample[0] - potential_loop[pos])
-    similarity_bias = ((point_diff * 50) ** 3 / 70000)
+    similarity_bias = ((point_diff * 50) ** 3 / 50000)
     score += similarity_bias
 
     amp_closeness = np.dot(
-        envelope[attack_index:(attack_index + increment_by_int)],
-        envelope[(attack_index + pos):(attack_index + pos + increment_by_int)]
-    ) / increment_by * 5
+        envelope_smoothed[attack_index:(attack_index + increment_by_int)],
+        envelope_smoothed[(attack_index + pos):(attack_index + pos + increment_by_int)]
+    ) / increment_by * 3
     score += amp_closeness
 
     if score > highest_score:
