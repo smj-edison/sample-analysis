@@ -39,6 +39,9 @@ def denorm_sig(signal, signal_min, signal_max):
 
     return signal_denorm
 
+def calc_rms(signal):
+    return np.sqrt(np.mean(signal**2))
+
 def resample_to(signal, output_length):
     return np.interp(np.linspace(0, 1, output_length), np.linspace(0, 1, len(signal)), signal)
 
