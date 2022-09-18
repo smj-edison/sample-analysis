@@ -16,11 +16,11 @@ freq = 659
 
 # use the hilbert transform to get the envelope
 envelope = calc_amp(nontremmed)
-envelope_norm, _, _ = norm_sig(envelope)
+envelope_norm = (norm_sig(envelope)[0] + 1.1) / 2
 
 # smooth the envelope signal down. The hilbert transform seems to have residue
 # audio within the signal, but a simple lowpass filter clears that up
-envelope_smoothed = butter_lowpass_filter(envelope, 10, sample_rate)[2000:]
+envelope_smoothed = np.log10(butter_lowpass_filter(envelope_norm, 10, sample_rate)[2000:])
 
 # take the derivative of the envelope. A decrease or increase in amplitude
 # will corrispond with a large value in the derivative, where a roughly uniform
@@ -100,60 +100,43 @@ attack_index = floor(attack_index)
 potential_loop = nontremmed[floor(attack_index):floor(release_index)]
 
 # Now we have where to look along for loop points, we'll proceed to do so
-increment_by = 256 #(sample_rate / freq) * 8
+increment_by = (sample_rate / freq) * 8
 increment_by_int = floor(increment_by)
 
 highest_score = -math.inf
 highest_index = -1
-highest_ref = -1
 
 ref_sample = potential_loop[0:increment_by_int]
 ref_sample_amps = resample_to(abs(rfft(ref_sample)[1:]), increment_by)
 
 last_plot = -math.inf
 
-min_loop_step = 1000
-last_hit = -min_loop_step
+for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 1):
+    pos = floor(i)
 
-for ref_i in range(0, floor(len(potential_loop) * 0.2), 1):
-    ref_sample = potential_loop[ref_i:(ref_i + increment_by_int)]
-    ref_sample_amps = resample_to(abs(rfft(ref_sample)[1:]), increment_by)
+    # calculate score based on what provides the least harmonic distortion
+    potential_end = potential_loop[(pos - increment_by_int):pos]
+    analysis = abs(rfft(np.concatenate((potential_end, ref_sample)))[1:]) / ref_sample_amps
+    bias = (1 - (np.linspace(0.0, 1.0, len(analysis)) ** 2)) * 2
+    
+    score = -math.sqrt(np.sum(np.abs(analysis / ref_sample_amps * bias)**2))
 
-    if ref_i - last_hit >= min_loop_step:
-        rms = calc_rms(envelope_deriv[i:(i + search_width)])
-    else:
-        continue
+    if score > highest_score:
+        if score - last_plot > 20:
+            plt.plot(np.concatenate((potential_end, ref_sample)))
+            plt.show()
 
-    print(f"ref_i: {ref_i}")
+            last_plot = score
 
-    for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 1):
-        pos = floor(i)
+        highest_score = score
+        highest_index = pos
 
-        # calculate score based on what provides the least harmonic distortion
-        potential_end = potential_loop[(pos - increment_by_int):pos]
-        analysis = abs(rfft(np.concatenate((potential_end, ref_sample)))[1:]) / ref_sample_amps
-        bias = (2 - np.log10(np.linspace(1.0, 20.0, len(analysis))))
-        
-        score = -math.sqrt(np.sum(np.abs(analysis / ref_sample_amps * bias)**2))
-
-        if score > highest_score:
-            if score - last_plot > 0.02:
-                plt.plot(np.concatenate((potential_end, ref_sample)))
-                plt.show()
-
-                last_plot = score
-
-            highest_score = score
-            highest_index = pos
-            highest_ref = ref_i
-
-            print(f"harmonic distortion: {-score}")
+        print(f"harmonic distortion: {-score}")
 
 plt.plot(np.concatenate((potential_loop[(highest_index - increment_by_int):highest_index], ref_sample)))
 plt.show()
 
 loop_end = attack_index + highest_index
-attack_index += highest_ref
 
 
 plt.plot(np.concatenate((nontremmed[(loop_end - 512):loop_end], nontremmed[attack_index:(attack_index + 512)])))
