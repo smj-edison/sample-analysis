@@ -7,7 +7,7 @@ from analysis import calc_amp
 from scipy.signal import zoom_fft
 from scipy.fft import rfft, fftfreq
 from scipy.io import wavfile
-from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig
+from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig, resample_to
 
 
 sample_rate, nontremmed = load_audio_mono("./test-samples/076-E.wav")
@@ -105,50 +105,62 @@ increment_by_int = floor(increment_by)
 
 highest_score = -math.inf
 highest_index = -1
+highest_ref = -1
 
 ref_sample = potential_loop[0:increment_by_int]
+ref_sample_amps = resample_to(abs(rfft(ref_sample)[1:]), increment_by)
 
 last_plot = -math.inf
 
-for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 1):
-    pos = floor(i)
+min_loop_step = 1000
+last_hit = -min_loop_step
 
-    # calculate score based on what provides the least harmonic distortion
-    potential_end = potential_loop[(pos - increment_by_int):pos]
-    analysis = rfft(np.concatenate((potential_end, ref_sample)), norm="ortho")
+for ref_i in range(0, floor(len(potential_loop) * 0.2), 1):
+    ref_sample = potential_loop[ref_i:(ref_i + increment_by_int)]
+    ref_sample_amps = resample_to(abs(rfft(ref_sample)[1:]), increment_by)
 
-    analysis[0] = 0+0j
+    if ref_i - last_hit >= min_loop_step:
+        rms = calc_rms(envelope_deriv[i:(i + search_width)])
+    else:
+        continue
 
-    harmonics = freq * np.arange(1, 34, 1)
-    harmonics_lookup = np.floor(harmonics / sample_rate * len(analysis) * 2)
-    harmonics_comp = list(map(lambda index: analysis[floor(index)], harmonics_lookup[1:]))
-    
-    score = -math.sqrt(np.sum(np.abs(harmonics_comp)**2)) / abs(analysis[floor(harmonics_lookup[0])])
+    print(f"ref_i: {ref_i}")
 
-    if score > highest_score:
-        if score - last_plot > 0.001:
-            plt.plot(np.concatenate((potential_end, ref_sample)))
-            plt.show()
+    for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 1):
+        pos = floor(i)
 
-            last_plot = score
+        # calculate score based on what provides the least harmonic distortion
+        potential_end = potential_loop[(pos - increment_by_int):pos]
+        analysis = abs(rfft(np.concatenate((potential_end, ref_sample)))[1:]) / ref_sample_amps
+        bias = (2 - np.log10(np.linspace(1.0, 20.0, len(analysis))))
+        
+        score = -math.sqrt(np.sum(np.abs(analysis / ref_sample_amps * bias)**2))
 
-        highest_score = score
-        highest_index = pos
+        if score > highest_score:
+            if score - last_plot > 0.02:
+                plt.plot(np.concatenate((potential_end, ref_sample)))
+                plt.show()
 
-        print(f"harmonic distortion: {-score}")
+                last_plot = score
 
-plt.plot(np.concatenate((potential_loop[highest_index:(highest_index + increment_by_int)], ref_sample)))
+            highest_score = score
+            highest_index = pos
+            highest_ref = ref_i
+
+            print(f"harmonic distortion: {-score}")
+
+plt.plot(np.concatenate((potential_loop[(highest_index - increment_by_int):highest_index], ref_sample)))
 plt.show()
 
-
 loop_end = attack_index + highest_index
+attack_index += highest_ref
+
 
 plt.plot(np.concatenate((nontremmed[(loop_end - 512):loop_end], nontremmed[attack_index:(attack_index + 512)])))
 plt.show()
 
 # loop test
 loop = nontremmed[attack_index:loop_end]
-loop = potential_loop[0:highest_index]
 out = np.concatenate((loop, loop, loop, loop, loop))
 wavfile.write("loop.wav", sample_rate, out)
 
