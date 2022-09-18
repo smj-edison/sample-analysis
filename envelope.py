@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 from analysis import calc_amp
 from scipy.signal import zoom_fft
+from scipy.fft import rfft, fftfreq
 from scipy.io import wavfile
 from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig
 
@@ -99,7 +100,7 @@ attack_index = floor(attack_index)
 potential_loop = nontremmed[floor(attack_index):floor(release_index)]
 
 # Now we have where to look along for loop points, we'll proceed to do so
-increment_by = (sample_rate / freq) * 8
+increment_by = 256 #(sample_rate / freq) * 8
 increment_by_int = floor(increment_by)
 
 highest_score = -math.inf
@@ -107,43 +108,47 @@ highest_index = -1
 
 ref_sample = potential_loop[0:increment_by_int]
 
+last_plot = -math.inf
+
 for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 1):
     pos = floor(i)
 
-    score = 0
+    # calculate score based on what provides the least harmonic distortion
+    potential_end = potential_loop[(pos - increment_by_int):pos]
+    analysis = rfft(np.concatenate((potential_end, ref_sample)), norm="ortho")
 
-    cross_corr = (ref_sample.dot(potential_loop[pos:(pos + increment_by_int)]) / increment_by) * 10
-    score += cross_corr
+    analysis[0] = 0+0j
 
-    # encourage first samples to line up more than any of the others
-    point_diff = 0.5 - abs(ref_sample[0] - potential_loop[pos])
-    similarity_bias = ((point_diff * 50) ** 3 / 50000)
-    score += similarity_bias
-
-    amp_closeness = np.dot(
-        envelope_smoothed[attack_index:(attack_index + increment_by_int)],
-        envelope_smoothed[(attack_index + pos):(attack_index + pos + increment_by_int)]
-    ) / increment_by * 3
-    score += amp_closeness
+    harmonics = freq * np.arange(1, 34, 1)
+    harmonics_lookup = np.floor(harmonics / sample_rate * len(analysis) * 2)
+    harmonics_comp = list(map(lambda index: analysis[floor(index)], harmonics_lookup[1:]))
+    
+    score = -math.sqrt(np.sum(np.abs(harmonics_comp)**2)) / abs(analysis[floor(harmonics_lookup[0])])
 
     if score > highest_score:
+        if score - last_plot > 0.001:
+            plt.plot(np.concatenate((potential_end, ref_sample)))
+            plt.show()
+
+            last_plot = score
+
         highest_score = score
         highest_index = pos
 
-        print(f"cross correlation: {cross_corr}")
-        print(f"similarity: {similarity_bias} (diff {point_diff})")
-        print(f"amplitude closeness: {amp_closeness}")
-        print("---")
+        print(f"harmonic distortion: {-score}")
 
-plt.plot(potential_loop[0:increment_by_int])
-plt.plot(potential_loop[highest_index:(highest_index + increment_by_int)])
+plt.plot(np.concatenate((potential_loop[highest_index:(highest_index + increment_by_int)], ref_sample)))
 plt.show()
 
 
-loop_end = highest_index + floor(attack_index)
+loop_end = attack_index + highest_index
+
+plt.plot(np.concatenate((nontremmed[(loop_end - 512):loop_end], nontremmed[attack_index:(attack_index + 512)])))
+plt.show()
 
 # loop test
-loop = nontremmed[floor(attack_index):loop_end]
+loop = nontremmed[attack_index:loop_end]
+loop = potential_loop[0:highest_index]
 out = np.concatenate((loop, loop, loop, loop, loop))
 wavfile.write("loop.wav", sample_rate, out)
 
