@@ -3,10 +3,10 @@ import pywt
 
 from math import pi, floor
 import cmath
-from scipy.signal import zoom_fft, hilbert
+from scipy.signal import zoom_fft, savgol_filter
 import matplotlib.pyplot as plt
 
-from helpers import butter_lowpass_filter, denorm_sig, norm_sig, resample_to
+from helpers import butter_lowpass_filter, denorm_sig, norm_sig, resample_to, hl_envelopes_idx
 
 two_pi = pi * 2
 
@@ -24,8 +24,13 @@ def calc_freqs(audio, sample_rate, min_freq, max_freq, steps):
 
     return freqs_to_check[maxes]
 
-def calc_amp(audio):
-    return abs(hilbert(audio))
+def calc_amp(audio, dmin=300, dmax=300):
+    _, low_idx = hl_envelopes_idx(audio, dmin=dmin, dmax=dmax)
+
+    env_points = np.concatenate((np.zeros(2), audio[low_idx]))
+
+    return resample_to(savgol_filter(env_points, 3, 2), len(audio), kind='cubic')
+
 
 def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_steps=20):
     # smooth down signals, then move them back to their original range

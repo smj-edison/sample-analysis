@@ -4,24 +4,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from analysis import calc_amp
-from scipy.signal import zoom_fft
+from scipy.signal import zoom_fft, savgol_filter
 from scipy.signal.windows import hann
 from scipy.fft import rfft, fftfreq
 from scipy.io import wavfile
 from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig, resample_to
 
 
-sample_rate, nontremmed = load_audio_mono("./test-samples/120-C.wav")
+sample_rate, nontremmed = load_audio_mono("./test-samples/069-A-nt.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
 freq = 8372.02
 
-# use the hilbert transform to get the envelope
-envelope = calc_amp(nontremmed)
-envelope_norm = (norm_sig(envelope)[0] + 1.1) / 2
-
-# smooth the envelope signal down. The hilbert transform seems to have residue
-# audio within the signal, but a simple lowpass filter clears that up
-envelope_smoothed = np.log10(butter_lowpass_filter(envelope_norm, 10, sample_rate)[2000:])
+# use the hilbert transform to get the envelope and smooth the envelope signal down.
+# The hilbert transform seems to have residue audio within the signal, but a simple
+# lowpass filter clears that up
+envelope = calc_amp(nontremmed, dmin=(sample_rate // 300), dmax=(sample_rate // 300)) + 0.1
+envelope_smoothed = 20 * np.log10(envelope)
 
 # take the derivative of the envelope. A decrease or increase in amplitude
 # will corrispond with a large value in the derivative, where a roughly uniform
@@ -37,7 +35,7 @@ mean = np.mean(envelope_deriv)
 std = np.std(envelope_deriv)
 
 # find the peaks
-peak_attack = np.argmax(envelope_deriv)
+peak_attack = np.argmax(envelope_deriv[0:(len(envelope_deriv) // 2)])
 peak_release = np.argmin(envelope_deriv[peak_attack:]) + peak_attack
 
 
@@ -47,8 +45,8 @@ attack_index = -1
 # search for spots to stay within for picking a loop
 search_width = 10000
 search_step = 100
-strictness_start = 0.5
-startness_start_for_release = 0.2
+strictness_start = 0.6
+startness_start_for_release = 0.4
 strictness_relax_factor = 1.2
 too_far_in_percentage_attack = 0.15
 too_far_in_percentage_release = 0.2
@@ -81,7 +79,6 @@ while release_index == -1:
     max_start = min(peak_release + search_width // 2, len(nontremmed) - search_width)
     for i in range(max_start, max(peak_attack, search_width), -search_step):
         rms = calc_rms(envelope_deriv[(i - search_width):i] * hann(search_width))
-        print(rms)
 
         if rms < (std * strictness) + mean:
             release_index = i - search_width / 2
@@ -104,7 +101,7 @@ attack_index = floor(attack_index)
 potential_loop = nontremmed[floor(attack_index):floor(release_index)]
 
 # Now we have where to look along for loop points, we'll proceed to do so
-increment_by = (sample_rate / freq) * 8
+increment_by = max((sample_rate / freq) * 8, 512)
 increment_by_int = floor(increment_by)
 
 highest_score = -math.inf
