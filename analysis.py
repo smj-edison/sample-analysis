@@ -3,7 +3,7 @@ import pywt
 
 from math import pi, floor
 import cmath
-from scipy.signal import zoom_fft, savgol_filter
+from scipy.signal import zoom_fft, savgol_filter, hilbert
 import matplotlib.pyplot as plt
 
 from helpers import butter_lowpass_filter, denorm_sig, norm_sig, resample_to, hl_envelopes_idx
@@ -31,6 +31,8 @@ def calc_amp(audio, dmin=300, dmax=300):
 
     return resample_to(savgol_filter(env_points, 3, 2), len(audio), kind='cubic')
 
+def calc_amp_hilbert(audio):
+    return abs(hilbert(audio))
 
 def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_steps=20):
     # smooth down signals, then move them back to their original range
@@ -39,7 +41,7 @@ def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_
     freq_smoothed = butter_lowpass_filter(freq_norm, lp_freq, sample_rate)
     freq_final = denorm_sig(freq_smoothed, freq_min, freq_max)
 
-    amp = calc_amp(sig)
+    amp = calc_amp_hilbert(sig)
     amp_norm, amp_min, amp_max = norm_sig(amp)
     amp_smoothed = butter_lowpass_filter(amp_norm, lp_freq, sample_rate)
     amp_final = denorm_sig(amp_smoothed, amp_min, amp_max)
