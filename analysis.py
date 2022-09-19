@@ -3,6 +3,8 @@ import pywt
 
 from math import pi, floor
 import cmath
+
+from scipy.interpolate import interp1d
 from scipy.signal import zoom_fft, savgol_filter, hilbert
 import matplotlib.pyplot as plt
 
@@ -26,10 +28,15 @@ def calc_freqs(audio, sample_rate, min_freq, max_freq, steps):
 
 def calc_amp(audio, dmin=300, dmax=300):
     _, low_idx = hl_envelopes_idx(audio, dmin=dmin, dmax=dmax)
+    low_idx = np.append(np.insert(low_idx, 0, 0), len(audio) - 1)
 
-    env_points = np.concatenate((np.zeros(2), audio[low_idx]))
+    env_points = audio[low_idx]
+    env_points_smoothed = savgol_filter(env_points, 3, 2)
 
-    return resample_to(savgol_filter(env_points, 3, 2), len(audio), kind='cubic')
+    # to prevent oscillations when doing the cubic interpolation
+    interp = interp1d(low_idx, env_points_smoothed, kind='linear')(range(0, len(audio), 10))
+
+    return resample_to(savgol_filter(interp, 1000, 3), len(audio), kind='cubic')
 
 def calc_amp_hilbert(audio):
     return abs(hilbert(audio))
