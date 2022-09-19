@@ -4,21 +4,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from analysis import calc_amp
-from scipy.signal import zoom_fft, savgol_filter
 from scipy.signal.windows import hann
-from scipy.fft import rfft, fftfreq
+from scipy.fft import rfft
 from scipy.io import wavfile
-from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig, resample_to
+from helpers import load_audio_mono, calc_rms, norm_sig, resample_to
 
 
-sample_rate, nontremmed = load_audio_mono("./test-samples/069-A-nt.wav")
+sample_rate, nontremmed = load_audio_mono("./test-samples/036-C-nt.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-freq = 8372.02
+freq = 65.41
 
 # use the hilbert transform to get the envelope and smooth the envelope signal down.
 # The hilbert transform seems to have residue audio within the signal, but a simple
 # lowpass filter clears that up
-envelope = calc_amp(nontremmed, dmin=(sample_rate // 300), dmax=(sample_rate // 300)) + 0.1
+envelope = calc_amp(nontremmed, dmin=(sample_rate // 300), dmax=(sample_rate // 300)) + 0.2
 envelope_smoothed = 20 * np.log10(envelope)
 
 # take the derivative of the envelope. A decrease or increase in amplitude
@@ -43,7 +42,7 @@ peak_release = np.argmin(envelope_deriv[peak_attack:]) + peak_attack
 attack_index = -1
 
 # search for spots to stay within for picking a loop
-search_width = 10000
+search_width = 5000
 search_step = 100
 strictness_start = 0.6
 startness_start_for_release = 0.4
@@ -76,7 +75,7 @@ while attack_index == -1:
 release_index = -1
 strictness = startness_start_for_release
 while release_index == -1:
-    max_start = min(peak_release + search_width // 2, len(nontremmed) - search_width)
+    max_start = len(nontremmed) - search_width
     for i in range(max_start, max(peak_attack, search_width), -search_step):
         rms = calc_rms(envelope_deriv[(i - search_width):i] * hann(search_width))
 
