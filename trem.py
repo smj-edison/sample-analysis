@@ -16,20 +16,18 @@ assumed_min_trem_speed = 1
 
 trem_steps = 512
 
-analysis_range = [420, 460]
+analysis_range = [120, 140]
+freq = 130
 
 
-sample_rate, nontremmed = load_audio_mono("./069-A-nt.wav")
-sample_rate, tremmed = load_audio_mono("./069-A.wav")
-
-_, c_sharp = load_audio_mono("./test-samples/073-C#.wav")
-_, e = load_audio_mono("./test-samples/076-E.wav")
+sample_rate, nontremmed = load_audio_mono("./test-samples/048-C-nt.wav")
+sample_rate, tremmed = load_audio_mono("./test-samples/048-C.wav")
 
 nt_freq, nt_amp = get_sig_freq_and_amp(nontremmed, sample_rate, analysis_range[0], analysis_range[1])
 base_freq = np.mean(nt_freq)
 base_amp = np.mean(nt_amp)
 
-freq_trem_table, amp_trem_table, trem_freq = calc_trem_table(tremmed, 440, sample_rate, plot_results=True)
+freq_trem_table, amp_trem_table, trem_freq = calc_trem_table(tremmed, freq, sample_rate, plot_results=True)
 
 detune_trem_table = freq_trem_table / base_freq
 gain_trem_table = amp_trem_table / base_amp
@@ -47,7 +45,7 @@ audio_loc = 1/sample_rate
 global_loc = 0
 detune = 1
 
-output_audio_len = np.min([len(nontremmed), len(c_sharp), len(e)]) - 4
+output_audio_len = len(nontremmed) - 4
 
 while audio_loc < output_audio_len / sample_rate:
     pos_in_audio = audio_loc * sample_rate
@@ -55,9 +53,7 @@ while audio_loc < output_audio_len / sample_rate:
     detune = table_lookup(detune_trem_table, trem_freq, global_loc)
     gain = table_lookup(gain_trem_table, trem_freq, global_loc) * 0.3
 
-    sample = (audio_lookup(pos_in_audio, nontremmed) * gain +
-              audio_lookup(pos_in_audio, c_sharp) * gain +
-              audio_lookup(pos_in_audio, e) * gain)
+    sample = audio_lookup(pos_in_audio, nontremmed) * gain
 
     audio_out.append(sample)
 
@@ -65,4 +61,4 @@ while audio_loc < output_audio_len / sample_rate:
     audio_loc += detune / sample_rate
     global_loc += 1 / sample_rate
 
-wavfile.write("out-chord.wav", sample_rate, np.array(audio_out))
+wavfile.write("out.wav", sample_rate, np.array(audio_out))

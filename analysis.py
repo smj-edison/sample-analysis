@@ -48,7 +48,7 @@ def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_
     freq_smoothed = butter_lowpass_filter(freq_norm, lp_freq, sample_rate)
     freq_final = denorm_sig(freq_smoothed, freq_min, freq_max)
 
-    amp = calc_amp_hilbert(sig)
+    amp = calc_amp(sig, dmin=100, dmax=100)
     amp_norm, amp_min, amp_max = norm_sig(amp)
     amp_smoothed = butter_lowpass_filter(amp_norm, lp_freq, sample_rate)
     amp_final = denorm_sig(amp_smoothed, amp_min, amp_max)
@@ -81,6 +81,7 @@ def calc_trem_shape(sig_unnorm, sample_rate, min_trem_speed=1, max_trem_speed=9,
     if len(slices[-1]) != len(slices[0]):
         slices.pop()
 
+    # average up the chunks
     trem_chunks = np.stack(slices)
     avg_trem = np.mean(trem_chunks, axis=0)
     avg_trem_final = denorm_sig(avg_trem, sig_min, sig_max)
@@ -148,7 +149,7 @@ def calc_trem_table(
         max_trem_speed=max_trem_speed
     )
 
-    trem_freq = sample_rate / ((len(freq_trem) + len(amp_trem)) / 2)
+    trem_freq = sample_rate / len(amp_trem)
 
     freq_trem_table = resample_to(freq_trem, trem_steps)
     amp_trem_table = resample_to(amp_trem, trem_steps)
