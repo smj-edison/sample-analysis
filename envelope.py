@@ -5,14 +5,15 @@ import matplotlib.pyplot as plt
 
 from analysis import calc_amp
 from scipy.signal import zoom_fft
+from scipy.signal.windows import hann
 from scipy.fft import rfft, fftfreq
 from scipy.io import wavfile
 from helpers import butter_lowpass_filter, load_audio_mono, calc_rms, norm_sig, resample_to
 
 
-sample_rate, nontremmed = load_audio_mono("./test-samples/036-C-nt.wav")
+sample_rate, nontremmed = load_audio_mono("./test-samples/120-C.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-freq = 65.41
+freq = 8372.02
 
 # use the hilbert transform to get the envelope
 envelope = calc_amp(nontremmed)
@@ -39,15 +40,15 @@ std = np.std(envelope_deriv)
 peak_attack = np.argmax(envelope_deriv)
 peak_release = np.argmin(envelope_deriv[peak_attack:]) + peak_attack
 
+
 # find start of attack
 attack_index = -1
-release_index = -1
-
 
 # search for spots to stay within for picking a loop
-search_width = 40000
+search_width = 10000
 search_step = 100
 strictness_start = 0.5
+startness_start_for_release = 0.2
 strictness_relax_factor = 1.2
 too_far_in_percentage_attack = 0.15
 too_far_in_percentage_release = 0.2
@@ -74,10 +75,13 @@ while attack_index == -1:
     if strictness > 50:
         raise Exception("signal is too noisy")
 
-strictness = strictness_start
+release_index = -1
+strictness = startness_start_for_release
 while release_index == -1:
-    for i in range(peak_release, max(peak_attack, search_width), -search_step):
-        rms = calc_rms(envelope_deriv[(i - search_width):i])
+    max_start = min(peak_release + search_width // 2, len(nontremmed) - search_width)
+    for i in range(max_start, max(peak_attack, search_width), -search_step):
+        rms = calc_rms(envelope_deriv[(i - search_width):i] * hann(search_width))
+        print(rms)
 
         if rms < (std * strictness) + mean:
             release_index = i - search_width / 2
@@ -87,7 +91,7 @@ while release_index == -1:
     if release_index < len(nontremmed) * (1 - too_far_in_percentage_release):
         release_index = -1
 
-    strictness += strictness_relax_factor
+    strictness *= strictness_relax_factor
 
     if strictness > 50:
         raise Exception("signal is too noisy")
@@ -140,7 +144,7 @@ plt.axvline(x=attack_index, color="green")
 plt.axvline(x=loop_end, color="cyan")
 plt.axvline(x=release_index, color="red")
 plt.axvline(x=peak_release, color="purple")
-# plt.axhline(y=mean, color="black")
-# plt.axhline(y=mean + std*2, color="black")
-# plt.axhline(y=mean - std*2, color="black")
+plt.axhline(y=mean, color="black")
+plt.axhline(y=mean + std*2, color="black")
+plt.axhline(y=mean - std*2, color="black")
 plt.show()
