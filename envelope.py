@@ -14,9 +14,7 @@ sample_rate, nontremmed = load_audio_mono("./test-samples/036-C-nt.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
 freq = 65.41
 
-# use the hilbert transform to get the envelope and smooth the envelope signal down.
-# The hilbert transform seems to have residue audio within the signal, but a simple
-# lowpass filter clears that up
+# calculate the envelope and convert to logarithmic scale
 envelope = calc_amp(nontremmed, dmin=(sample_rate // 300), dmax=(sample_rate // 300)) + 0.2
 envelope_smoothed = 20 * np.log10(envelope)
 
@@ -33,10 +31,13 @@ envelope_deriv = np.gradient(envelope_smoothed, 1)
 mean = np.mean(envelope_deriv)
 std = np.std(envelope_deriv)
 
-# find the peaks
+# PART ONE: Find attack and release locations
+
+# 1. Find the peaks (these are the maximum bounds to start searching for our attack and release).
+# The peaks (max/min) in the derivative are the biggest swings in amplitude, so the loop most
+# definitely needs to be inside.
 peak_attack = np.argmax(envelope_deriv[0:(len(envelope_deriv) // 2)])
 peak_release = np.argmin(envelope_deriv[peak_attack:]) + peak_attack
-
 
 # find start of attack
 attack_index = -1
@@ -50,12 +51,13 @@ strictness_relax_factor = 1.2
 too_far_in_percentage_attack = 0.15
 too_far_in_percentage_release = 0.2
 
+# search through the envelope to find a part that is within the standard deviation.
+# pretty much find a part of the signal that is not doing anything crazy, which
+# is what we want for a loop point.
 # it starts very strict, and will keep trying and relaxing until it gets a good hit
 strictness = strictness_start
+
 while attack_index == -1:
-    # search through the envelope to find a part that is within the standard deviation.
-    # pretty much find a part of the signal that is not doing anything crazy, which
-    # is what we want for a loop point.
     for i in range(peak_attack, peak_release, search_step):
         rms = calc_rms(envelope_deriv[i:(i + search_width)])
 
@@ -67,11 +69,13 @@ while attack_index == -1:
     if attack_index > len(nontremmed) * too_far_in_percentage_attack:
         attack_index = -1
 
+    # relax the strictness and try again
     strictness *= strictness_relax_factor
 
     if strictness > 50:
         raise Exception("signal is too noisy")
 
+# same for release, except in the opposite direction
 release_index = -1
 strictness = startness_start_for_release
 while release_index == -1:
@@ -94,30 +98,30 @@ while release_index == -1:
 
 attack_index = floor(attack_index)
 
-# To make sure phases line up, we'll take the fft surrounding the inputted frequency
-# this way we can zero in on the exact frequency that we should be checking for loop
-# points along
-potential_loop = nontremmed[floor(attack_index):floor(release_index)]
+# slice off the beginning and end of the sample. We don't want to deal with
+# the randomness of attack and release parts, because next we're looking for a
+# loop
+loop_search_slice = nontremmed[floor(attack_index):floor(release_index)]
 
-# Now we have where to look along for loop points, we'll proceed to do so
+
 increment_by = max((sample_rate / freq) * 8, 512)
 increment_by_int = floor(increment_by)
 
 highest_score = -math.inf
 highest_index = -1
 
-ref_sample = potential_loop[0:increment_by_int]
+ref_sample = loop_search_slice[0:increment_by_int]
 ref_sample_amps = resample_to(abs(rfft(ref_sample, norm="ortho")[1:]), increment_by_int)
 bias = (1 - (np.linspace(0.0, 1.0, increment_by_int) ** 2)) * 2
 
 
-for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by_int, 2):
+for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - increment_by_int, 2):
     pos = floor(i)
 
     # calculate score based on what provides the least harmonic distortion
-    potential_end = potential_loop[(pos - increment_by_int):pos]
+    potential_end = loop_search_slice[(pos - increment_by_int):pos]
     analysis = abs(rfft(np.concatenate((potential_end, ref_sample)), norm="ortho")[1:]) / ref_sample_amps
-    
+
     score = -math.sqrt(np.sum(np.abs(analysis * bias)**2))
 
     if score > highest_score:
@@ -126,7 +130,8 @@ for i in np.arange(len(potential_loop) * 0.6, len(potential_loop) - increment_by
 
 loop_end = attack_index + highest_index
 
-plt.plot(np.concatenate((nontremmed[(loop_end - increment_by_int):loop_end], nontremmed[attack_index:(attack_index + increment_by_int)])))
+plt.plot(np.concatenate((nontremmed[(loop_end - increment_by_int):loop_end],
+                         nontremmed[attack_index:(attack_index + increment_by_int)])))
 plt.show()
 
 # loop test
