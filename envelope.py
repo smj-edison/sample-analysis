@@ -99,6 +99,10 @@ for i in range(search_start, search_end, search_step):
 attack_index = floor(attack_index)
 release_index = floor(release_index)
 
+# search in the area around attack index for where it hits zero
+search_area = nontremmed[attack_index:(attack_index + 1000)]
+attack_index += np.argmin(search_area)
+
 # PART TWO: find loop point
 # I use a pretty unique solution here. I was inspired when I was finding loops manually.
 # The way I determined whether a loop was good or not was whether it made a "click" sound
@@ -117,19 +121,19 @@ release_index = floor(release_index)
 
 
 def calc_harmonics(x):
-    return abs(zoom_fft(x, [freq, freq*15], fs=48000))
+    return abs(rfft(x))
 
 
 loop_search_slice = nontremmed[floor(attack_index):floor(release_index)]
 
 # slice_width is how wide of a slice to take from the beginning and end of the loop
 # align it to a power of 2 for FFT
-slice_width = 2 ** ceil(log2(max((sample_rate / freq) * 4, 512)))
+slice_width = 2 ** ceil(log2(max((sample_rate / freq), 512)))
 slice_width_int = floor(slice_width)
 
 # ref_sample is the reference sample (for normalizing `test_loop`)
 ref_sample = loop_search_slice[0:slice_width_int]
-ref_sample_amps = resample_to(calc_harmonics(ref_sample), slice_width_int * 2)
+ref_sample_amps = resample_to(calc_harmonics(ref_sample), slice_width_int + 1)
 
 # this is a curve that biases the lower frequencies, making them more punishing
 harmonic_bias = (1 - (np.linspace(0.0, 1.0, slice_width_int + 1) ** 3)) * 2
@@ -151,7 +155,7 @@ for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_
     test_loop_amps_norm = test_loop_amps / ref_sample_amps
 
     # bias the lower frequencies, they are more audible
-    test_loop_amps_biased = test_loop_amps_norm[0:100]  # * harmonic_bias
+    test_loop_amps_biased = np.maximum(test_loop_amps_norm, ref_sample_amps) * harmonic_bias
 
     # calculate distortion (sqrt isn't necessary)
     score = np.sum(np.abs(test_loop_amps_biased)**2)
