@@ -1,16 +1,17 @@
 import math
-from math import floor
+from math import floor, log2, ceil
 import numpy as np
 import matplotlib.pyplot as plt
 
 from analysis import calc_amp
+from scipy.signal import zoom_fft
 from scipy.signal.windows import hann
 from scipy.fft import rfft
 from scipy.io import wavfile
-from helpers import load_audio_mono, calc_rms, norm_sig, resample_to
+from helpers import load_audio_mono, norm_sig, resample_to
 
-
-sample_rate, nontremmed = load_audio_mono("/home/mason/rust/mjuo/vpo-backend/060-C.wav")
+# /home/mason/rust/mjuo/vpo-backend/060-C.wav
+sample_rate, nontremmed = load_audio_mono("./test-samples/069-A-nt.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
 freq = 440
 
@@ -42,7 +43,7 @@ attack_index = -1
 
 # 2. Search through the envelope to find the amplitude that's closest to the mean
 # also, incentivize it to use a loop point closer to the beginning or ending
-search_width = 10000
+search_width = 20000
 search_step = 100
 
 # used to tune what region attack and release points can be in
@@ -60,19 +61,19 @@ lowest_score = math.inf
 # we're looking for when the signal amplitude stabilizes, by looking where the derivative becomes within normal
 # fluctuation
 for i in range(search_start, search_end, search_step):
-    env_slice = envelope_deriv[i:(i + search_width)]
+    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width)
     env_slice_mean = np.mean(env_slice)
     median_dist = abs(env_slice_mean - median)
 
     # incentivize the loop start to be at the beginning of the sample
-    end_penalty = 0.1 * std * ((i - search_start) / search_span)**2
+    end_penalty = 0  # 0.1 * std * ((i - search_start) / search_span)**2
 
     # lower score = better
     score = median_dist + end_penalty
 
     if score < lowest_score:
         lowest_score = score
-        attack_index = i
+        attack_index = i + search_width / 2
 
 lowest_score = math.inf
 
@@ -81,7 +82,7 @@ search_end = peak_release - search_width
 search_span = search_end - search_start
 
 for i in range(search_start, search_end, search_step):
-    env_slice = envelope_db[i:(i + search_width)]
+    env_slice = envelope_db[i:(i + search_width)] * hann(search_width)
     env_slice_mean = np.mean(env_slice)
     median_dist = abs(env_slice_mean - median)
 
@@ -113,21 +114,28 @@ release_index = floor(release_index)
 # slice off the beginning and end of the sample. We don't want to deal with
 # the randomness of attack and release parts, because next we're looking for a
 # loop
+
+
+def calc_harmonics(x):
+    return abs(zoom_fft(x, [freq, freq*15], fs=48000))
+
+
 loop_search_slice = nontremmed[floor(attack_index):floor(release_index)]
 
 # slice_width is how wide of a slice to take from the beginning and end of the loop
-slice_width = max((sample_rate / freq) * 8, 512)
+# align it to a power of 2 for FFT
+slice_width = 2 ** ceil(log2(max((sample_rate / freq) * 4, 512)))
 slice_width_int = floor(slice_width)
 
 # ref_sample is the reference sample (for normalizing `test_loop`)
 ref_sample = loop_search_slice[0:slice_width_int]
-ref_sample_amps = resample_to(abs(rfft(ref_sample, norm="ortho")[1:]), slice_width_int)
+ref_sample_amps = resample_to(calc_harmonics(ref_sample), slice_width_int * 2)
 
 # this is a curve that biases the lower frequencies, making them more punishing
-harmonic_bias = (1 - (np.linspace(0.0, 1.0, slice_width_int) ** 2)) * 2
+harmonic_bias = (1 - (np.linspace(0.0, 1.0, slice_width_int + 1) ** 3)) * 2
 
-highest_score = -math.inf
-highest_index = -1
+lowest_score = math.inf
+lowest_index = -1
 
 for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_width_int, 2):
     pos = floor(i)
@@ -137,22 +145,22 @@ for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_
 
     # loop to test distortion
     test_loop = np.concatenate((potential_end, ref_sample))
-    test_loop_amps = abs(rfft(test_loop, norm="ortho")[1:])
+    test_loop_amps = calc_harmonics(test_loop)
 
     # normalize the amplitudes by the reference sample
     test_loop_amps_norm = test_loop_amps / ref_sample_amps
 
     # bias the lower frequencies, they are more audible
-    test_loop_amps_biased = test_loop_amps_norm * harmonic_bias
+    test_loop_amps_biased = test_loop_amps_norm[0:100]  # * harmonic_bias
 
     # calculate distortion (sqrt isn't necessary)
-    score = -np.sum(np.abs(test_loop_amps_biased)**2)
+    score = np.sum(np.abs(test_loop_amps_biased)**2)
 
-    if score > highest_score:
-        highest_score = score
-        highest_index = pos
+    if score < lowest_score:
+        lowest_score = score
+        lowest_index = pos
 
-loop_end = attack_index + highest_index
+loop_end = attack_index + lowest_index
 
 plt.plot(np.concatenate((nontremmed[(loop_end - slice_width_int):loop_end],
                          nontremmed[attack_index:(attack_index + slice_width_int)])))
@@ -163,7 +171,7 @@ loop = nontremmed[attack_index:loop_end]
 out = np.concatenate((loop, loop, loop, loop, loop))
 wavfile.write("loop.wav", sample_rate, out)
 
-plt.plot(envelope_deriv)
+plt.plot(envelope_db)
 plt.axvline(x=peak_attack, color="blue")
 plt.axvline(x=attack_index, color="green")
 plt.axvline(x=loop_end, color="cyan")
