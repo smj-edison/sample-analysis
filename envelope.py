@@ -10,7 +10,7 @@ from scipy.io import wavfile
 from helpers import load_audio_mono, calc_rms, norm_sig, resample_to
 
 
-sample_rate, nontremmed = load_audio_mono("./test-samples/069-A-nt.wav")
+sample_rate, nontremmed = load_audio_mono("/home/mason/rust/mjuo/vpo-backend/060-C.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
 freq = 440
 
@@ -25,10 +25,8 @@ envelope_db = 20 * np.log10(envelope)
 # (which both corrispond with a strong change in volume)
 envelope_deriv = np.gradient(envelope_db, 1)
 
-# calculate mean and standard deviation of the envelope. I use this to check whether
-# a segment of signal is within normal variation (take RMS of part of signal, then
-# see whether it's below standard deviation, or some multiple of)
-mean = np.mean(envelope_deriv)
+# calculate median and standard deviation of the envelope derivative
+median = np.median(envelope_deriv)
 std = np.std(envelope_deriv)
 
 # PART ONE: Find attack and release locations
@@ -44,14 +42,14 @@ attack_index = -1
 
 # 2. Search through the envelope to find the amplitude that's closest to the mean
 # also, incentivize it to use a loop point closer to the beginning or ending
-search_width = 5000
+search_width = 10000
 search_step = 100
 
 # used to tune what region attack and release points can be in
 # attack region is from `0` to `len(nontremmed) * too_far_in_percentage_attack``
 # release region is from `len(nontremmed) * too_far_in_percentage_release` to peak_release
 too_far_in_percentage_attack = 0.15
-too_far_in_percentage_release = 0.8
+too_far_in_percentage_release = 0.7
 
 search_start = peak_attack
 search_end = floor(min(peak_release - search_width, len(nontremmed) * too_far_in_percentage_attack))
@@ -59,20 +57,22 @@ search_span = search_end - search_start
 
 lowest_score = math.inf
 
+# we're looking for when the signal amplitude stabilizes, by looking where the derivative becomes within normal
+# fluctuation
 for i in range(search_start, search_end, search_step):
-    env_slice = envelope_db[i:(i + search_width)]
-    rms = calc_rms(env_slice)
-    rms_dist = abs(rms - mean)
+    env_slice = envelope_deriv[i:(i + search_width)]
+    env_slice_mean = np.mean(env_slice)
+    median_dist = abs(env_slice_mean - median)
 
     # incentivize the loop start to be at the beginning of the sample
-    end_bias = std * (1 - (i - search_start) / search_span)
+    end_penalty = 0.1 * std * ((i - search_start) / search_span)**2
 
     # lower score = better
-    score = rms + end_bias
+    score = median_dist + end_penalty
 
     if score < lowest_score:
         lowest_score = score
-        attack_index = i + search_width / 2
+        attack_index = i
 
 lowest_score = math.inf
 
@@ -82,14 +82,14 @@ search_span = search_end - search_start
 
 for i in range(search_start, search_end, search_step):
     env_slice = envelope_db[i:(i + search_width)]
-    rms = calc_rms(env_slice)
-    rms_dist = abs(rms - mean)
+    env_slice_mean = np.mean(env_slice)
+    median_dist = abs(env_slice_mean - median)
 
     # incentivize the loop end to be at the end of the sample
-    end_bias = 0  # std * (i - search_start) / search_span
+    beginning_penalty = 0.3 * std * (1 - (i - search_start)**2 / search_span)
 
     # lower score = better
-    score = rms + end_bias
+    score = median_dist + beginning_penalty
 
     if score < lowest_score:
         lowest_score = score
@@ -145,8 +145,7 @@ for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_
     # bias the lower frequencies, they are more audible
     test_loop_amps_biased = test_loop_amps_norm * harmonic_bias
 
-    # calculate distortion
-    #score = -math.sqrt(np.sum(np.abs(test_loop_amps_biased)**2))
+    # calculate distortion (sqrt isn't necessary)
     score = -np.sum(np.abs(test_loop_amps_biased)**2)
 
     if score > highest_score:
@@ -170,7 +169,7 @@ plt.axvline(x=attack_index, color="green")
 plt.axvline(x=loop_end, color="cyan")
 plt.axvline(x=release_index, color="red")
 plt.axvline(x=peak_release, color="purple")
-plt.axhline(y=mean, color="black")
-plt.axhline(y=mean + std*2, color="black")
-plt.axhline(y=mean - std*2, color="black")
+plt.axhline(y=median, color="black")
+plt.axhline(y=median + std, color="black")
+plt.axhline(y=median - std, color="black")
 plt.show()
