@@ -12,6 +12,7 @@ from helpers import butter_lowpass_filter, denorm_sig, norm_sig, resample_to, hl
 
 two_pi = pi * 2
 
+
 def calc_freqs(audio, sample_rate, min_freq, max_freq, steps):
     freqs_to_check = np.linspace(min_freq, max_freq, steps, endpoint=False)
     widths = sample_rate / freqs_to_check
@@ -26,20 +27,23 @@ def calc_freqs(audio, sample_rate, min_freq, max_freq, steps):
 
     return freqs_to_check[maxes]
 
+
 def calc_amp(audio, dmin=300, dmax=300):
     _, low_idx = hl_envelopes_idx(audio, dmin=dmin, dmax=dmax)
     low_idx = np.append(np.insert(low_idx, 0, 0), len(audio) - 1)
 
     env_points = audio[low_idx]
-    env_points_smoothed = savgol_filter(env_points, 3, 2)
 
     # to prevent oscillations when doing the cubic interpolation
-    interp = interp1d(low_idx, env_points_smoothed, kind='linear')(range(0, len(audio), 10))
+    interp = interp1d(low_idx, env_points, kind='linear')(range(0, len(audio), 100))
+    interp_smoothed = savgol_filter(interp, 48, 2)
 
-    return resample_to(savgol_filter(interp, 1000, 3), len(audio), kind='cubic')
+    return resample_to(interp_smoothed, len(audio), kind='cubic')
+
 
 def calc_amp_hilbert(audio):
     return abs(hilbert(audio))
+
 
 def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_steps=20):
     # smooth down signals, then move them back to their original range
@@ -54,6 +58,7 @@ def get_sig_freq_and_amp(sig, sample_rate, min_freq, max_freq, lp_freq=20, freq_
     amp_final = denorm_sig(amp_smoothed, amp_min, amp_max)
 
     return (freq_final, amp_final)
+
 
 def calc_trem_shape(sig_unnorm, sample_rate, min_trem_speed=1, max_trem_speed=9, plot_results=False):
     sig, sig_min, sig_max = norm_sig(sig_unnorm)
@@ -97,6 +102,7 @@ def calc_trem_shape(sig_unnorm, sample_rate, min_trem_speed=1, max_trem_speed=9,
 
     return avg_trem_final, offset
 
+
 def get_best_roll(sig_to_roll, sig_ref):
     roll_by = 0
     largest = 0
@@ -111,6 +117,7 @@ def get_best_roll(sig_to_roll, sig_ref):
         sig_to_roll = np.roll(sig_to_roll, 1)
 
     return roll_by
+
 
 def calc_trem_table(
     audio,

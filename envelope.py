@@ -58,7 +58,7 @@ search_span = search_end - search_start
 
 lowest_score = math.inf
 
-# we're looking for when the signal amplitude stabilizes, by looking where the derivative becomes within normal
+# we're looking for when the signal amplitude stabilizes, by looking where the derivative is within normal
 # fluctuation
 for i in range(search_start, search_end, search_step):
     env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width)
@@ -75,6 +75,7 @@ for i in range(search_start, search_end, search_step):
         lowest_score = score
         attack_index = i + search_width / 2
 
+# same approach for finding release
 lowest_score = math.inf
 
 search_start = floor(min(peak_release - search_width, len(nontremmed) * too_far_in_percentage_release))
@@ -101,7 +102,34 @@ release_index = floor(release_index)
 
 # search in the area around attack index for where it hits zero
 search_area = nontremmed[attack_index:(attack_index + 1000)]
-attack_index += np.argmin(search_area)
+attack_index += np.argmin(abs(search_area))
+
+# PART TWO: find loop point
+
+# VV alternate approach (WIP) VV
+# set slice size (align for FFT)
+# slice_width = 2 ** ceil(log2(max((sample_rate / freq), 512)))
+
+# # look for a spot of equal amplitude as attack
+# attack_amp = envelope_db[attack_index]
+
+# loop_end_search_start = floor(len(nontremmed) * 0.6)
+# loop_end_area = np.argmin(abs(envelope_db[loop_end_search_start:release_index] - attack_amp)) + loop_end_search_start
+
+# ref_sample = nontremmed[attack_index:(attack_index + slice_width)]
+# ref_fft = zoom_fft(ref_sample, [freq / 2, freq * 16.5], m=512)
+# ref_phases = np.angle(ref_fft)
+
+# loop_end_sample = nontremmed[loop_end_area:(loop_end_area + slice_width)]
+# loop_end_fft = zoom_fft(loop_end_sample, [freq / 2, freq * 16], m=512)
+# loop_end_phases = np.angle(loop_end_fft)
+
+# phase_diff = (loop_end_phases[16] - ref_phases[16]) * freq / math.pi
+# loop_end = floor(loop_end_area + phase_diff)
+
+# plt.plot(np.concatenate((nontremmed[(loop_end - slice_width):loop_end],
+#                          nontremmed[attack_index:(attack_index + slice_width)])))
+# plt.show()
 
 # PART TWO: find loop point
 # I use a pretty unique solution here. I was inspired when I was finding loops manually.
@@ -129,23 +157,22 @@ loop_search_slice = nontremmed[floor(attack_index):floor(release_index)]
 # slice_width is how wide of a slice to take from the beginning and end of the loop
 # align it to a power of 2 for FFT
 slice_width = 2 ** ceil(log2(max((sample_rate / freq), 512)))
-slice_width_int = floor(slice_width)
 
 # ref_sample is the reference sample (for normalizing `test_loop`)
-ref_sample = loop_search_slice[0:slice_width_int]
-ref_sample_amps = resample_to(calc_harmonics(ref_sample), slice_width_int + 1)
+ref_sample = loop_search_slice[0:slice_width]
+ref_sample_amps = resample_to(calc_harmonics(ref_sample), slice_width + 1)
 
 # this is a curve that biases the lower frequencies, making them more punishing
-harmonic_bias = (1 - (np.linspace(0.0, 1.0, slice_width_int + 1) ** 3)) * 2
+harmonic_bias = (1 - (np.linspace(0.0, 1.0, slice_width + 1) ** 3)) * 2
 
 lowest_score = math.inf
 lowest_index = -1
 
-for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_width_int, 2):
+for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_width, 2):
     pos = floor(i)
 
     # calculate score based on what provides the least harmonic distortion
-    potential_end = loop_search_slice[(pos - slice_width_int):pos]
+    potential_end = loop_search_slice[(pos - slice_width):pos]
 
     # loop to test distortion
     test_loop = np.concatenate((potential_end, ref_sample))
@@ -166,8 +193,8 @@ for i in np.arange(len(loop_search_slice) * 0.6, len(loop_search_slice) - slice_
 
 loop_end = attack_index + lowest_index
 
-plt.plot(np.concatenate((nontremmed[(loop_end - slice_width_int):loop_end],
-                         nontremmed[attack_index:(attack_index + slice_width_int)])))
+plt.plot(np.concatenate((nontremmed[(loop_end - slice_width):loop_end],
+                         nontremmed[attack_index:(attack_index + slice_width)])))
 plt.show()
 
 # loop test

@@ -5,3 +5,6 @@ cmath
 *.wav
 *.mp3
 *.wv
+!test-samples/069-A-nt.wav
+math
+.vscode/*
