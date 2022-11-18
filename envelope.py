@@ -138,18 +138,12 @@ def cosine_fadein(x):
 # loop test
 loop = np.copy(nontremmed[attack_index:loop_end])
 
-crossfade_length = 512
+crossfade_length = 256
 crossfade = np.linspace(0, 1, crossfade_length)
 fadeout = cosine_fadeout(crossfade)
 fadein = cosine_fadein(crossfade)
 
 crossed = (fadeout * loop[-crossfade_length:]) + (fadein * loop[0:crossfade_length])
-
-ang = np.angle(zoom_fft(res, [440, 440], fs=48000, m=1))[0]
-ang += (440*(1/48000)*crossfade_length)
-after_ang = np.angle(zoom_fft(loop[0:crossfade_length], [440, 440], fs=48000, m=1))[0]
-delta_ang = after_ang - ang+math.pi
-delta_ang_mapped = delta_ang/440*48000
 
 loop_sans_crossed = loop[crossfade_length:-crossfade_length]
 
