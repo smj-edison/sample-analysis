@@ -11,9 +11,12 @@ from scipy.io import wavfile
 from helpers import load_audio_mono, norm_sig, resample_to
 
 # /home/mason/rust/mjuo/vpo-backend/060-C.wav
-sample_rate, nontremmed = load_audio_mono("./test-samples/069-A-nt.wav")
+sample_rate, nontremmed = load_audio_mono("./060-C.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-freq = 440
+midi_note = 120
+freq = (440 / 32) * (2 ** ((midi_note - 9) / 12))
+
+nontremmed_deriv = np.gradient(nontremmed, 1)
 
 # calculate the envelope and convert to logarithmic scale
 envelope = calc_amp(nontremmed, dmin=(sample_rate // 300), dmax=(sample_rate // 300)) + 0.2
@@ -83,12 +86,12 @@ search_end = peak_release - search_width
 search_span = search_end - search_start
 
 for i in range(search_start, search_end, search_step):
-    env_slice = envelope_db[i:(i + search_width)] * hann(search_width)
+    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width)
     env_slice_mean = np.mean(env_slice)
     median_dist = abs(env_slice_mean - median)
 
     # incentivize the loop end to be at the end of the sample
-    beginning_penalty = 0.3 * std * (1 - (i - search_start)**2 / search_span)
+    beginning_penalty = 0.3 * std * (1 - (i - search_start) / search_span)**2
 
     # lower score = better
     score = median_dist + beginning_penalty
@@ -104,41 +107,103 @@ release_index = floor(release_index)
 search_area = nontremmed[attack_index:(attack_index + 1000)]
 attack_index += np.argmin(abs(search_area))
 
-# PART TWO: find loop point
 
-# VV alternate approach (WIP) VV
-slice_width = max((sample_rate / freq), 512) // 1
+#############################
+# PART TWO: find loop point #
+#############################
 
-# look for a spot of equal amplitude as attack
-attack_amp = envelope_db[attack_index]
+# HUGE thanks to https://sourceforge.net/p/loopauditioneer/code/HEAD/tree/trunk/src/AutoLooping.cpp
+# for determining the loop point
+DERIVATIVE_THRESHOLD = 0.02
+MIN_LOOP_LENGTH = 1.0  # seconds
+DISTANCE_BETWEEN_LOOPS = 0.3  # seconds
+QUALITY_FACTOR = 8  # value (8) /32767 (0.00008) for float)
+FINAL_PASS_COUNT = 1000
 
-loop_end_search_start = floor(len(nontremmed) * 0.6)
-loop_end_area = np.argmin(abs(envelope_db[loop_end_search_start:release_index] - attack_amp)) + loop_end_search_start
+max_derivative = np.std(nontremmed_deriv)
+derivative_threshold = max_derivative * DERIVATIVE_THRESHOLD
+passed = abs(nontremmed_deriv) < derivative_threshold
 
-res = np.convolve(nontremmed[(loop_end_area - slice_width * 2):(loop_end_area + slice_width * 2)],
-                  nontremmed[(attack_index - slice_width):(attack_index + slice_width)], mode="valid")
-loop_end = np.argmax(res) + loop_end_area - slice_width * 2
+indicies_passed = np.array([i for i, x in enumerate(passed) if x])
+in_range = np.logical_and(indicies_passed > attack_index, indicies_passed < release_index)
+indicies_passed = indicies_passed[in_range]
+# TODO: remove superfluous values in indexes_passed
 
-plt.plot(np.concatenate((nontremmed[(loop_end - slice_width):loop_end],
-                         nontremmed[attack_index:(attack_index + slice_width)])))
+slice_width = max((sample_rate / freq) * 2, 512) // 2 * 2
+min_loop_length = MIN_LOOP_LENGTH * sample_rate
+distance_between_loops = DISTANCE_BETWEEN_LOOPS * sample_rate
+
+found_loops = []
+
+for from_index in indicies_passed:
+    for to_index in indicies_passed:
+        if to_index < from_index + min_loop_length:
+            continue
+
+        if from_index + slice_width >= len(nontremmed) or to_index + slice_width >= len(nontremmed):
+            continue
+
+        if len(found_loops) > 0 and from_index - found_loops[-1][0][0] < distance_between_loops:
+            continue
+
+        # cross correlation (squared error)
+        cross = (nontremmed[(from_index - 2):(from_index + 3)] - nontremmed[(to_index - 2):(to_index + 3)]) ** 2
+        correlation_value = np.mean(cross)
+
+        if correlation_value < QUALITY_FACTOR * QUALITY_FACTOR / 32767.0:
+            found_loops.append(((from_index, to_index), correlation_value))
+
+found_loops.sort(key=lambda x: x[1])
+
+top_loops = found_loops[0:FINAL_PASS_COUNT]
+top_pick = top_loops[0]
+
+end_loop_sample = nontremmed[floor(top_pick[0][1] - slice_width):top_pick[0][1]]
+start_loop_sample = nontremmed[top_pick[0][0]:(top_pick[0][0] + slice_width)]
+plt.plot(np.concatenate((end_loop_sample, start_loop_sample)))
 plt.show()
 
-# 274641
+loop_start = top_pick[0][0]
+loop_end = top_pick[0][1]
+
+# out of the loops, which one lines up best spectral-wise?
+spectral_match = []
+
+for top_pick in top_loops:
+    end = nontremmed[(top_pick[0][1] - slice_width):top_pick[0][1]]
+    start = nontremmed[top_pick[0][0]:(top_pick[0][0] + slice_width)]
+
+    ref = resample_to(zoom_fft(end, [freq, min(freq * 16, sample_rate / 2 - 1)]), slice_width * 2)
+
+    together = np.concatenate((end, start))
+    res = zoom_fft(together, [freq, freq * 16])
+
+    distortion = np.sum((np.abs(res) / np.abs(ref)) ** 2)
+
+    spectral_match.append(((top_pick[0][0], top_pick[0][1]), distortion))
+
+spectral_match.sort(key=lambda x: x[1])
+
+loop_start = spectral_match[0][0][0]
+loop_end = spectral_match[0][0][1]
 
 
 def cosine_fadeout(x):
     """ x: 0 - 1 """
-    return np.cos(x * math.pi / 2)
+    return 1 - x
+    # return np.cos(x * math.pi / 2)
 
 
 def cosine_fadein(x):
-    return np.cos((x * math.pi / 2) - math.pi / 2)
+    return x
+    # return np.cos((x * math.pi / 2) - math.pi / 2)
 
 
 # loop test
-loop = np.copy(nontremmed[attack_index:loop_end])
-
 crossfade_length = 256
+
+loop = np.copy(nontremmed[loop_start:floor(loop_end + crossfade_length)])
+
 crossfade = np.linspace(0, 1, crossfade_length)
 fadeout = cosine_fadeout(crossfade)
 fadein = cosine_fadein(crossfade)
@@ -154,6 +219,7 @@ plt.show()
 
 out = np.concatenate((loop_sans_crossed, crossed, loop_sans_crossed,
                       crossed, loop_sans_crossed, crossed, loop_sans_crossed))
+# out = np.concatenate((loop, loop, loop))
 wavfile.write("loop.wav", sample_rate, out)
 
 plt.plot(envelope_db)
