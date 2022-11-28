@@ -188,13 +188,13 @@ loop_end = top_pick[0][1]
 # loop_end = spectral_match[0][0][1]
 
 
-def cosine_fadeout(x):
+def lin_fadeout(x):
     """ x: 0 - 1 """
     return 1 - x
     # return np.cos(x * math.pi / 2)
 
 
-def cosine_fadein(x):
+def lin_fadein(x):
     return x
     # return np.cos((x * math.pi / 2) - math.pi / 2)
 
@@ -205,8 +205,8 @@ crossfade_length = 256
 loop = np.copy(nontremmed[loop_start:floor(loop_end + crossfade_length)])
 
 crossfade = np.linspace(0, 1, crossfade_length)
-fadeout = cosine_fadeout(crossfade)
-fadein = cosine_fadein(crossfade)
+fadeout = lin_fadeout(crossfade)
+fadein = lin_fadein(crossfade)
 
 crossed = (fadeout * loop[-crossfade_length:]) + (fadein * loop[0:crossfade_length])
 
