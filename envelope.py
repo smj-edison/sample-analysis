@@ -167,25 +167,25 @@ loop_start = top_pick[0][0]
 loop_end = top_pick[0][1]
 
 # out of the loops, which one lines up best spectral-wise?
-spectral_match = []
+# spectral_match = []
 
-for top_pick in top_loops:
-    end = nontremmed[(top_pick[0][1] - slice_width):top_pick[0][1]]
-    start = nontremmed[top_pick[0][0]:(top_pick[0][0] + slice_width)]
+# for top_pick in top_loops:
+#     end = nontremmed[(top_pick[0][1] - slice_width):top_pick[0][1]]
+#     start = nontremmed[top_pick[0][0]:(top_pick[0][0] + slice_width)]
 
-    ref = resample_to(zoom_fft(end, [freq, min(freq * 16, sample_rate / 2 - 1)]), slice_width * 2)
+#     ref = resample_to(zoom_fft(end, [freq, min(freq * 16, sample_rate / 2 - 1)]), slice_width * 2)
 
-    together = np.concatenate((end, start))
-    res = zoom_fft(together, [freq, freq * 16])
+#     together = np.concatenate((end, start))
+#     res = zoom_fft(together, [freq, freq * 16])
 
-    distortion = np.sum((np.abs(res) / np.abs(ref)) ** 2)
+#     distortion = np.sum((np.abs(res) / np.abs(ref)) ** 2)
 
-    spectral_match.append(((top_pick[0][0], top_pick[0][1]), distortion))
+#     spectral_match.append(((top_pick[0][0], top_pick[0][1]), distortion))
 
-spectral_match.sort(key=lambda x: x[1])
+# spectral_match.sort(key=lambda x: x[1])
 
-loop_start = spectral_match[0][0][0]
-loop_end = spectral_match[0][0][1]
+# loop_start = spectral_match[0][0][0]
+# loop_end = spectral_match[0][0][1]
 
 
 def cosine_fadeout(x):
