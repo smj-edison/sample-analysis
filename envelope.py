@@ -8,12 +8,11 @@ from scipy.signal import zoom_fft
 from scipy.signal.windows import hann
 from scipy.fft import rfft
 from scipy.io import wavfile
-from helpers import load_audio_mono, norm_sig, resample_to
+from helpers import load_audio_mono, norm_sig, resample_to, calc_rms
 
-# /home/mason/rust/mjuo/vpo-backend/060-C.wav
-sample_rate, nontremmed = load_audio_mono("./060-C.wav")
+sample_rate, nontremmed = load_audio_mono("./072-C.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-midi_note = 120
+midi_note = 69
 freq = (440 / 32) * (2 ** ((midi_note - 9) / 12))
 
 nontremmed_deriv = np.gradient(nontremmed, 1)
@@ -64,19 +63,19 @@ lowest_score = math.inf
 # we're looking for when the signal amplitude stabilizes, by looking where the derivative is within normal
 # fluctuation
 for i in range(search_start, search_end, search_step):
-    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width)
+    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width * 2)[search_width:(search_width * 2)]
     env_slice_mean = np.mean(env_slice)
-    median_dist = abs(env_slice_mean - median)
+    median_dist = abs(env_slice_mean - median) / std
 
     # incentivize the loop start to be at the beginning of the sample
-    end_penalty = 0  # 0.1 * std * ((i - search_start) / search_span)**2
+    end_penalty = 3 * ((i - search_start) / search_span)**2
 
     # lower score = better
     score = median_dist + end_penalty
 
     if score < lowest_score:
         lowest_score = score
-        attack_index = i + search_width / 2
+        attack_index = i
 
 # same approach for finding release
 lowest_score = math.inf
@@ -86,19 +85,19 @@ search_end = peak_release - search_width
 search_span = search_end - search_start
 
 for i in range(search_start, search_end, search_step):
-    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width)
+    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width * 2)[0:search_width]
     env_slice_mean = np.mean(env_slice)
-    median_dist = abs(env_slice_mean - median)
+    median_dist = abs(env_slice_mean - median) / std
 
     # incentivize the loop end to be at the end of the sample
-    beginning_penalty = 0.3 * std * (1 - (i - search_start) / search_span)**2
+    beginning_penalty = 3 * (1 - (i - search_start) / search_span)**2
 
     # lower score = better
     score = median_dist + beginning_penalty
 
     if score < lowest_score:
         lowest_score = score
-        release_index = i + search_width / 2
+        release_index = i + search_width
 
 attack_index = floor(attack_index)
 release_index = floor(release_index)
@@ -107,6 +106,9 @@ release_index = floor(release_index)
 search_area = nontremmed[attack_index:(attack_index + 1000)]
 attack_index += np.argmin(abs(search_area))
 
+search_area = nontremmed[release_index:(release_index + 1000)]
+release_index += np.argmin(abs(search_area))
+
 
 #############################
 # PART TWO: find loop point #
@@ -114,7 +116,7 @@ attack_index += np.argmin(abs(search_area))
 
 # HUGE thanks to https://sourceforge.net/p/loopauditioneer/code/HEAD/tree/trunk/src/AutoLooping.cpp
 # for determining the loop point
-DERIVATIVE_THRESHOLD = 0.02
+DERIVATIVE_THRESHOLD = 0.03
 MIN_LOOP_LENGTH = 1.0  # seconds
 DISTANCE_BETWEEN_LOOPS = 0.3  # seconds
 QUALITY_FACTOR = 8  # value (8) /32767 (0.00008) for float)
@@ -147,7 +149,7 @@ for from_index in indicies_passed:
             continue
 
         # cross correlation (squared error)
-        cross = (nontremmed[(from_index - 2):(from_index + 3)] - nontremmed[(to_index - 2):(to_index + 3)]) ** 2
+        cross = (nontremmed[(from_index - 5):(from_index + 6)] - nontremmed[(to_index - 5):(to_index + 6)]) ** 2
         correlation_value = np.mean(cross)
 
         if correlation_value < QUALITY_FACTOR * QUALITY_FACTOR / 32767.0:
@@ -199,6 +201,15 @@ def lin_fadein(x):
     # return np.cos((x * math.pi / 2) - math.pi / 2)
 
 
+def cos_fadeout(x):
+    """ x: 0 - 1 """
+    return np.cos(x * math.pi / 2)
+
+
+def cos_fadein(x):
+    return np.cos((x * math.pi / 2) - math.pi / 2)
+
+
 # loop test
 crossfade_length = 256
 
@@ -217,18 +228,75 @@ plt.axvline(x=crossfade_length, color="black")
 plt.axvline(x=crossfade_length * 2, color="black")
 plt.show()
 
+
 out = np.concatenate((loop_sans_crossed, crossed, loop_sans_crossed,
                       crossed, loop_sans_crossed, crossed, loop_sans_crossed))
 # out = np.concatenate((loop, loop, loop))
 wavfile.write("loop.wav", sample_rate, out)
 
+## release test ##
+
+# arbitrary release
+stop_index = 175000
+
+rms_before = calc_rms(nontremmed[(stop_index - 512):stop_index])
+rms_release = calc_rms(nontremmed[release_index:(release_index + 512)])
+
+fadeout = cos_fadeout(crossfade)
+fadein = cos_fadein(crossfade)
+
+# adjust release amplitude
+amp_change = rms_before / rms_release
+sig_renorm = nontremmed * amp_change
+
+# find best cross-correlation in the next bit of release
+to_index = release_index
+
+lowest_score = math.inf
+stop_at_index = -1
+
+# what has the crossfade with the largest rms?
+for from_index in range(stop_index, stop_index + 1024):
+    cross = (nontremmed[(from_index - 5):(from_index + 6)] - sig_renorm[(to_index - 5):(to_index + 6)]) ** 2
+    correlation_value = np.mean(cross)
+
+    if correlation_value < lowest_score:
+        stop_at_index = from_index
+        lowest_score = correlation_value
+
+# plot the two concatenated together
+plt.plot(
+    np.concatenate(
+        (nontremmed[(stop_at_index - 256): stop_at_index],
+         sig_renorm[release_index: (release_index + 256)])))
+plt.show()
+
+release_crossed = (fadeout * nontremmed[stop_at_index:(stop_at_index + crossfade_length)]
+                   ) + (fadein * sig_renorm[release_index:(release_index + crossfade_length)])
+
+plt.plot(nontremmed[stop_at_index:(stop_at_index + crossfade_length)])
+plt.plot(sig_renorm[release_index:(release_index + crossfade_length)])
+plt.plot(release_crossed)
+plt.show()
+
+test_release_clip = np.concatenate(
+    (nontremmed[(stop_at_index - sample_rate):stop_at_index],
+     release_crossed,
+     nontremmed[(release_index + crossfade_length): len(nontremmed)]))
+wavfile.write("release.wav", sample_rate, test_release_clip)
+
+
+################
+## final plot ##
+################
 plt.plot(envelope_db)
-plt.axvline(x=peak_attack, color="blue")
-plt.axvline(x=attack_index, color="green")
+plt.plot(envelope_deriv * 5000)
+plt.axvline(x=attack_index, color="blue")
+plt.axvline(x=loop_start, color="green")
+plt.axvline(x=stop_index, color="orange")
 plt.axvline(x=loop_end, color="cyan")
 plt.axvline(x=release_index, color="red")
-plt.axvline(x=peak_release, color="purple")
-plt.axhline(y=median, color="black")
-plt.axhline(y=median + std, color="black")
-plt.axhline(y=median - std, color="black")
+plt.axhline(y=median * 5000, color="black")
+plt.axhline(y=median * 5000 + std * 5000, color="black")
+plt.axhline(y=median * 5000 - std * 5000, color="black")
 plt.show()
