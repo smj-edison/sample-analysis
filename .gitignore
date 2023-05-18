@@ -8,3 +8,4 @@ cmath
 !test-samples/069-A-nt.wav
 math
 .vscode/*
+venv

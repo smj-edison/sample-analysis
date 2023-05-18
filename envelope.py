@@ -1,3 +1,4 @@
+import json
 import math
 from math import floor, log2, ceil
 import numpy as np
@@ -10,9 +11,11 @@ from scipy.fft import rfft
 from scipy.io import wavfile
 from helpers import load_audio_mono, norm_sig, resample_to, calc_rms
 
-sample_rate, nontremmed = load_audio_mono("./072-C.wav")
+sample_rate, nontremmed = load_audio_mono("/home/mason/Documents/mjuo/organ1/samples/post-horn/085-C#.wav")
 nontremmed, source_min, source_max = norm_sig(nontremmed)
-midi_note = 69
+sample_len = len(nontremmed)
+
+midi_note = 36
 freq = (440 / 32) * (2 ** ((midi_note - 9) / 12))
 
 nontremmed_deriv = np.gradient(nontremmed, 1)
@@ -28,10 +31,6 @@ envelope_db = 20 * np.log10(envelope)
 # (which both corrispond with a strong change in volume)
 envelope_deriv = np.gradient(envelope_db, 1)
 
-# calculate median and standard deviation of the envelope derivative
-median = np.median(envelope_deriv)
-std = np.std(envelope_deriv)
-
 # PART ONE: Find attack and release locations
 
 # 1. Find the peaks (these are the maximum bounds to start searching for our attack and release).
@@ -40,13 +39,16 @@ std = np.std(envelope_deriv)
 peak_attack = np.argmax(envelope_deriv[0:(len(envelope_deriv) // 2)])
 peak_release = np.argmin(envelope_deriv[peak_attack:]) + peak_attack
 
+# calculate median and standard deviation of the envelope derivative
+median = np.median(envelope_deriv[peak_attack:peak_release])
+std = np.std(envelope_deriv[peak_attack:peak_release])
+
 # find start of attack
 attack_index = -1
 
 # 2. Search through the envelope to find the amplitude that's closest to the mean
 # also, incentivize it to use a loop point closer to the beginning or ending
-search_width = 20000
-search_step = 100
+sensitivity = 0.5
 
 # used to tune what region attack and release points can be in
 # attack region is from `0` to `len(nontremmed) * too_far_in_percentage_attack``
@@ -54,53 +56,18 @@ search_step = 100
 too_far_in_percentage_attack = 0.15
 too_far_in_percentage_release = 0.7
 
-search_start = peak_attack
-search_end = floor(min(peak_release - search_width, len(nontremmed) * too_far_in_percentage_attack))
-search_span = search_end - search_start
+# find attack:
+# find first point inside of `std * sensitivity`, and after peak attack
+inside_of_std = abs(envelope_deriv[peak_attack:]) < (std * sensitivity)
+start_of_inside = np.gradient(inside_of_std * 1) > 0
+attack_index = peak_attack + np.argmax(start_of_inside)
 
-lowest_score = math.inf
-
-# we're looking for when the signal amplitude stabilizes, by looking where the derivative is within normal
-# fluctuation
-for i in range(search_start, search_end, search_step):
-    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width * 2)[search_width:(search_width * 2)]
-    env_slice_mean = np.mean(env_slice)
-    median_dist = abs(env_slice_mean - median) / std
-
-    # incentivize the loop start to be at the beginning of the sample
-    end_penalty = 3 * ((i - search_start) / search_span)**2
-
-    # lower score = better
-    score = median_dist + end_penalty
-
-    if score < lowest_score:
-        lowest_score = score
-        attack_index = i
-
-# same approach for finding release
-lowest_score = math.inf
-
-search_start = floor(min(peak_release - search_width, len(nontremmed) * too_far_in_percentage_release))
-search_end = peak_release - search_width
-search_span = search_end - search_start
-
-for i in range(search_start, search_end, search_step):
-    env_slice = envelope_deriv[i:(i + search_width)] * hann(search_width * 2)[0:search_width]
-    env_slice_mean = np.mean(env_slice)
-    median_dist = abs(env_slice_mean - median) / std
-
-    # incentivize the loop end to be at the end of the sample
-    beginning_penalty = 3 * (1 - (i - search_start) / search_span)**2
-
-    # lower score = better
-    score = median_dist + beginning_penalty
-
-    if score < lowest_score:
-        lowest_score = score
-        release_index = i + search_width
-
-attack_index = floor(attack_index)
-release_index = floor(release_index)
+# find release:
+# find last point outside of `std * sensitivity`, and before peak release
+outside_of_std = abs(envelope_deriv[floor(sample_len * too_far_in_percentage_release)
+                     :peak_release]) > (std * sensitivity)
+start_of_outside = np.gradient(outside_of_std * 1) > 0
+release_index = peak_release - np.argmax(start_of_outside[::-1])
 
 # search in the area around attack index for where it hits zero
 search_area = nontremmed[attack_index:(attack_index + 1000)]
@@ -116,7 +83,7 @@ release_index += np.argmin(abs(search_area))
 
 # HUGE thanks to https://sourceforge.net/p/loopauditioneer/code/HEAD/tree/trunk/src/AutoLooping.cpp
 # for determining the loop point
-DERIVATIVE_THRESHOLD = 0.03
+DERIVATIVE_THRESHOLD = 0.02
 MIN_LOOP_LENGTH = 1.0  # seconds
 DISTANCE_BETWEEN_LOOPS = 0.3  # seconds
 QUALITY_FACTOR = 8  # value (8) /32767 (0.00008) for float)
@@ -237,13 +204,13 @@ wavfile.write("loop.wav", sample_rate, out)
 ## release test ##
 
 # arbitrary release
-stop_index = 175000
+stop_index = 75000
 
 rms_before = calc_rms(nontremmed[(stop_index - 512):stop_index])
 rms_release = calc_rms(nontremmed[release_index:(release_index + 512)])
 
-fadeout = cos_fadeout(crossfade)
-fadein = cos_fadein(crossfade)
+fadeout = lin_fadeout(crossfade)
+fadein = lin_fadein(crossfade)
 
 # adjust release amplitude
 amp_change = rms_before / rms_release
@@ -255,7 +222,6 @@ to_index = release_index
 lowest_score = math.inf
 stop_at_index = -1
 
-# what has the crossfade with the largest rms?
 for from_index in range(stop_index, stop_index + 1024):
     cross = (nontremmed[(from_index - 5):(from_index + 6)] - sig_renorm[(to_index - 5):(to_index + 6)]) ** 2
     correlation_value = np.mean(cross)
@@ -299,4 +265,10 @@ plt.axvline(x=release_index, color="red")
 plt.axhline(y=median * 5000, color="black")
 plt.axhline(y=median * 5000 + std * 5000, color="black")
 plt.axhline(y=median * 5000 - std * 5000, color="black")
+plt.show()
+
+# testing
+f = open('/tmp/test.json')
+data = np.array(json.load(f))
+plt.plot(data)
 plt.show()

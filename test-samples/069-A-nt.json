@@ -1,8 +1,11 @@
 {
-  "loop_start": 0,
-  "loop_end": 100,
-  "release": 100,
-  "crossfade": 0,
+  "loop_start": 271106,
+  "loop_end": 327398,
+  "attack_index": 0,
+  "release_index": 342021,
+  "min_release_length": 5000,
+  "crossfade": 256,
+  "crossfade_release": 512,
   "note": 69,
   "cents": 0
 }

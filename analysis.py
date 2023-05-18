@@ -38,7 +38,7 @@ def calc_amp(audio, dmin=300, dmax=300):
     interp = interp1d(low_idx, env_points, kind='linear')(range(0, len(audio), 100))
     interp_smoothed = savgol_filter(interp, 48, 2)
 
-    return resample_to(interp_smoothed, len(audio), kind='cubic')
+    return resample_to(interp, len(audio), kind='cubic')
 
 
 def calc_amp_hilbert(audio):
