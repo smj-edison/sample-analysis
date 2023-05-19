@@ -19,9 +19,9 @@ from helpers import (
     resample_to,
 )
 
-fs, tremmed = load_audio_mono("./test-samples/072-C.wav")
-fs, nontremmed = load_audio_mono("./test-samples/072-C-nt.wav")
-freq = 523.25
+fs, tremmed = load_audio_mono("./test-samples/069-A.wav")
+fs, nontremmed = load_audio_mono("./test-samples/069-A-nt.wav")
+freq = 440
 
 
 def viz(x, Tx, Wx):
@@ -45,7 +45,7 @@ def ranged_cwt(sig, fmin, fmax, fs, nv=128):
         nv=nv,
     )
 
-    return ssq_cwt(tremmed, wavelet, scales)
+    return ssq_cwt(sig, wavelet, scales)
 
 
 # find tremulant period
@@ -55,8 +55,8 @@ def find_period(sig, fmin, fmax, fs):
     # find peak amplitude
     peak = np.max(freq_amps)
 
-    # find lowest frequency above at least half of peak
-    lowest = np.where(freq_amps > peak * 0.5)[0][0]
+    # find lowest frequency above at least 6/10ths of peak
+    lowest = np.where(freq_amps > peak * 0.6)[0][0]
 
     # localized maximum
     lower_bounds = int(max(lowest - len(sig) / 20, 0))
@@ -69,8 +69,8 @@ def find_period(sig, fmin, fmax, fs):
     return fs / frequency
 
 
-def calc_trem_shape(sig, fs):
-    period = find_period(sig, 0.5, 20, fs)
+def calc_trem_shape(sig, fs, min_trem_speed=0.5, max_trem_speed=15):
+    period = find_period(sig, min_trem_speed, max_trem_speed, fs)
 
     slices = np.array_split(sig, round(period))
 
@@ -88,25 +88,18 @@ def calc_trem_shape(sig, fs):
     return avg_trem, fs / period
 
 
-def calc_freqs(sig, note_freq, fs):
-    Tx, Wx, ssq_freqs, *_ = ranged_cwt(sig, note_freq * 0.7, note_freq * 1.5, fs)
+def calc_freqs_amps(sig, note_freq, fs):
+    Tx, Wx, ssq_freqs, *_ = ranged_cwt(sig, note_freq * 0.6, note_freq * 1.3, fs)
     peak_freqs = ssq_freqs[np.argmax(np.abs(Tx), axis=0)]
 
-    return peak_freqs * fs
+    amps = np.max(np.abs(Wx), axis=0)
 
-
-def calc_amps(sig, note_freq, fs):
-    window_size = int(fs / note_freq * 1.1)
-    sliding_rms = np.sqrt(
-        np.convolve(np.square(sig), np.ones(window_size), "valid") / window_size
-    )[(window_size // 2) :]
-
-    return sliding_rms
+    # trim off padding
+    return peak_freqs[1000:-1000] * fs, amps[1000:-1000]
 
 
 def calc_trem_table(sig, note_freq, fs, table_len=512):
-    freqs_unnorm = calc_freqs(sig, note_freq, fs)
-    amps_unnorm = calc_amps(sig, note_freq, fs)
+    freqs_unnorm, amps_unnorm = calc_freqs_amps(sig, note_freq, fs)
 
     # normalize and smooth signal
     freqs, freqs_min, freqs_max = norm_sig(np.log2(freqs_unnorm))
@@ -132,14 +125,16 @@ def calculate_shelf_table(nontremmed, tremmed, note_freq, fs, table_len=512):
         nontremmed, (note_freq * 3) * 0.7, (note_freq * 3) * 1.5, fs
     )
 
-    nontrem_amp = np.mean(np.max(np.abs(Wx), axis=0))
+    nontrem_amp = np.mean(np.max(np.abs(Tx), axis=0))
 
     # now look at third harmonic of tremmed version
     Tx, Wx, ssq_freqs, *_ = ranged_cwt(
         tremmed, (note_freq * 3) * 0.7, (note_freq * 3) * 1.5, fs
     )
 
-    trem_amps = np.max(np.abs(Wx), axis=0)
+    trem_amps = np.max(np.abs(Tx), axis=0)
+    trem_amps = butter_lowpass_filter(trem_amps, 50, fs, order=1)
+
     harmonic_trem, _ = calc_trem_shape(trem_amps, fs)
 
     harmonic_trem = harmonic_trem / nontrem_amp
@@ -147,15 +142,18 @@ def calculate_shelf_table(nontremmed, tremmed, note_freq, fs, table_len=512):
     return resample_to(harmonic_trem, table_len)
 
 
-nontremmed_freq = np.mean(calc_freqs(nontremmed[10000:200000], freq, fs))
-nontremmed_amp = np.mean(calc_amps(nontremmed[10000:200000], freq, fs))
+nontremmed_freqs, nontremmed_amps = calc_freqs_amps(nontremmed[100000:300000], freq, fs)
+nontremmed_freq = np.mean(nontremmed_freqs)
+nontremmed_amp = np.mean(nontremmed_amps)
 
 
-amps, freqs = calc_trem_table(tremmed[10000:200000], freq, fs)
+amps, freqs = calc_trem_table(tremmed[100000:300000], freq, fs)
 
 detune_trem_table = freqs / nontremmed_freq
 gain_trem_table = amps / nontremmed_amp
+
 shelf_trem_table = calculate_shelf_table(nontremmed, tremmed, freq, fs)
+shelf_trem_table = shelf_trem_table / gain_trem_table
 
 wavfile.write("detune-table.wav", fs, detune_trem_table)
 wavfile.write("gain-table.wav", fs, gain_trem_table)
