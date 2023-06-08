@@ -1,6 +1,7 @@
 import numpy as np
 from math import floor, ceil, factorial
-from scipy.signal import butter, lfilter
+
+from scipy.signal import butter, lfilter, firwin
 from scipy.interpolate import interp1d
 from scipy.io import wavfile
 
@@ -10,7 +11,7 @@ def lerp(a, b, t):
 
 
 def butter_lowpass(cutoff, fs, order=5):
-    return butter(order, cutoff, fs=fs, btype='low', analog=False)
+    return butter(order, cutoff, fs=fs, btype="low", analog=False)
 
 
 def butter_lowpass_filter(data, cutoff, fs, order=5):
@@ -19,8 +20,14 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
     return y
 
 
+def fir_lowpass(sig, cutoff, fs, taps=10):
+    filter = firwin(taps, cutoff / fs)
+
+    return np.convolve(sig, filter)
+
+
 def apply_filter(b, a, x, xm1, xm2):
-    return b[0]*x + b[1]*xm1 + b[2]*xm2 - a[1]*xm1 + a[2]*xm2
+    return b[0] * x + b[1] * xm1 + b[2] * xm2 - a[1] * xm1 + a[2] * xm2
 
 
 def load_audio_mono(filename):
@@ -52,14 +59,29 @@ def calc_rms(signal):
     return np.sqrt(np.mean(signal**2))
 
 
-def resample_to(signal, output_length, kind='linear'):
-    return interp1d(np.linspace(0, 1, len(signal)), signal, kind=kind)(np.linspace(0, 1, output_length))
+def gain_to_db(gain):
+    return 20 * np.log10(gain)
+
+
+def detune_to_cents(detune):
+    return np.log2(detune) * 1200
+
+
+def resample_to(signal, output_length, kind="linear"):
+    return interp1d(np.linspace(0, 1, len(signal)), signal, kind=kind)(
+        np.linspace(0, 1, output_length)
+    )
 
 
 def table_lookup(table, table_freq, pos):
     pos_in_table = pos * len(table) * table_freq
 
-    return lerp(table[floor(pos_in_table) % len(table)], table[ceil(pos_in_table) % len(table)], pos_in_table % 1)
+    return lerp(
+        table[floor(pos_in_table) % len(table)],
+        table[ceil(pos_in_table) % len(table)],
+        pos_in_table % 1,
+    )
+
 
 # https://stackoverflow.com/questions/34235530/how-to-get-high-and-low-envelope-of-a-signal
 
@@ -88,11 +110,16 @@ def hl_envelopes_idx(s, dmin=1, dmax=1, split=False):
         lmax = lmax[s[lmax] > s_mid]
 
     # global max of dmax-chunks of locals max
-    lmin = lmin[[i+np.argmin(s[lmin[i:i+dmin]]) for i in range(0, len(lmin), dmin)]]
+    lmin = lmin[
+        [i + np.argmin(s[lmin[i : i + dmin]]) for i in range(0, len(lmin), dmin)]
+    ]
     # global min of dmin-chunks of locals min
-    lmax = lmax[[i+np.argmax(s[lmax[i:i+dmax]]) for i in range(0, len(lmax), dmax)]]
+    lmax = lmax[
+        [i + np.argmax(s[lmax[i : i + dmax]]) for i in range(0, len(lmax), dmax)]
+    ]
 
     return lmin, lmax
+
 
 # https://stackoverflow.com/questions/1125666/how-do-you-do-bicubic-or-other-non-linear-interpolation-of-re-sampled-audio-da
 
