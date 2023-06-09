@@ -1,7 +1,7 @@
 import numpy as np
 from math import floor, ceil, factorial
 
-from scipy.signal import butter, lfilter, firwin
+from scipy.signal import butter, lfilter, firwin, filtfilt
 from scipy.interpolate import interp1d
 from scipy.io import wavfile
 
@@ -14,9 +14,9 @@ def butter_lowpass(cutoff, fs, order=5):
     return butter(order, cutoff, fs=fs, btype="low", analog=False)
 
 
-def butter_lowpass_filter(data, cutoff, fs, order=5):
+def butter_lowpass_filter(data, cutoff, fs, order=2):
     b, a = butter_lowpass(cutoff, fs, order=order)
-    y = lfilter(b, a, data)
+    y = filtfilt(b, a, data)
     return y
 
 
@@ -81,6 +81,12 @@ def table_lookup(table, table_freq, pos):
         table[ceil(pos_in_table) % len(table)],
         pos_in_table % 1,
     )
+
+
+def window_rms(a, window_size):
+    a2 = np.power(a, 2)
+    window = np.ones(window_size) / float(window_size)
+    return np.sqrt(np.convolve(a2, window, mode="valid"))
 
 
 # https://stackoverflow.com/questions/34235530/how-to-get-high-and-low-envelope-of-a-signal
